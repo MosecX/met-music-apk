@@ -1,4 +1,4 @@
-name: Build APK Directo
+name: Build APK Firmado
 
 on:
   push:
@@ -14,7 +14,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '18'
           
       - name: Setup JDK
         uses: actions/setup-java@v4
@@ -28,14 +28,25 @@ jobs:
       - name: Expo prebuild
         run: npx expo prebuild --clean
         
-      - name: Build APK
+      - name: Build release APK (unsigned)
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleRelease
           
+      # 👇 PASO NUEVO: Firmar el APK
+      - name: Sign APK
+        id: sign_apk
+        uses: r0adkll/sign-android-release@v1
+        with:
+          releaseDirectory: android/app/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.KEY_STORE }}
+          alias: ${{ secrets.KEY_ALIAS }}
+          keyStorePassword: ${{ secrets.KEY_STORE_PASS }}
+          keyPassword: ${{ secrets.KEY_PASS }}
+          
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: MetMusic-${{ github.sha }}.apk
-          path: android/app/build/outputs/apk/release/app-release.apk
+          name: MetMusic-Firmado-${{ github.sha }}.apk
+          path: ${{steps.sign_apk.outputs.signedReleaseFile}}
