@@ -1,4 +1,4 @@
-name: Build APK Firmado
+name: Build APK Directo
 
 on:
   push:
@@ -22,45 +22,20 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
           
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-          
       - name: Install dependencies
         run: npm install
         
       - name: Expo prebuild
         run: npx expo prebuild --clean
         
-      - name: Build release APK
+      - name: Build APK
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleRelease
           
-      # ✅ FIRMA MANUAL con apksigner
-      - name: Create keystore file
-        run: |
-          echo "${{ secrets.KEY_STORE }}" | base64 -d > keystore.jks
-          
-      - name: Sign APK
-        run: |
-          # Buscar el APK sin firmar
-          UNSIGNED_APK=$(find android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
-          echo "Firmando: $UNSIGNED_APK"
-          
-          # Firmar con apksigner
-          $ANDROID_HOME/build-tools/29.0.3/apksigner sign \
-            --ks keystore.jks \
-            --ks-key-alias ${{ secrets.KEY_ALIAS }} \
-            --ks-pass pass:${{ secrets.KEY_STORE_PASS }} \
-            --key-pass pass:${{ secrets.KEY_PASS }} \
-            --out android/app/build/outputs/apk/release/app-release-signed.apk \
-            "$UNSIGNED_APK"
-          
-          echo "signed_apk=android/app/build/outputs/apk/release/app-release-signed.apk" >> $GITHUB_OUTPUT
-          
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: MetMusic-Firmado-${{ github.sha }}.apk
-          path: android/app/build/outputs/apk/release/app-release-signed.apk
+          name: MetMusic-${{ github.sha }}.apk
+          path: android/app/build/outputs/apk/release/app-release.apk
