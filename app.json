@@ -59,7 +59,8 @@
           "microphonePermission": "Permitir que MetMusic acceda al micrófono para visualización de audio.",
           "recordAudioAndroid": true
         }
-      ]
+      ],
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,
