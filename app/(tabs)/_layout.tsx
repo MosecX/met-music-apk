@@ -1,3 +1,4 @@
+// app/(tabs)/_layout.tsx - VERSIÓN SIMPLIFICADA
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import { Platform, StyleSheet, View } from 'react-native';
@@ -6,12 +7,10 @@ import Player from '../../components/Player';
 import { usePlayer } from '../../context/PlayerContext';
 
 export default function TabsLayout() {
-  // ✅ SOLO AGREGAMOS playNext y playPrevious a la desestructuración
-  const { currentTrack, showExpanded, setShowExpanded, playNext, playPrevious, hasNext, hasPrev, clearQueue } = usePlayer();
+  const { currentTrack, showExpanded, setShowExpanded, clearQueue } = usePlayer();
   const insets = useSafeAreaInsets();
 
-  // LOG PARA VER QUÉ RECIBE
-  console.log('📱 Layout - currentTrack:', currentTrack?.title);
+  //console.log('📱 Layout - currentTrack:', currentTrack?.title);
 
   const tabBarHeight = Platform.OS === 'android' ? 60 + insets.bottom : 60;
 
@@ -19,10 +18,7 @@ export default function TabsLayout() {
     <View style={styles.container}>
       <Tabs
         screenOptions={{
-          // ✅ HEADER COMPLETAMENTE OCULTO (sin texto)
           headerShown: false,
-          
-          // ✅ TAB BAR configurado
           tabBarStyle: {
             backgroundColor: '#121212',
             borderTopColor: '#282828',
@@ -57,35 +53,22 @@ export default function TabsLayout() {
             <Ionicons name="library" size={size} color={color} />
           )
         }} />
-        <Tabs.Screen 
-          name="settings" 
-          options={{ 
-            title: 'Ajustes',
-            tabBarIcon: ({ color, size }) => (
-              <Ionicons name="settings" size={size} color={color} />
-            )
-          }} 
-        />
+        <Tabs.Screen name="settings" options={{ 
+          title: 'Ajustes',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="settings" size={size} color={color} />
+          )
+        }} />
       </Tabs>
 
-      {/* Player - AHORA CON CONDICIONAL EXPLÍCITA */}
       {currentTrack && currentTrack.id && (
         <View style={[
           styles.playerWrapper,
-          {
-            bottom: tabBarHeight + (currentTrack && !showExpanded ? 0 : 0),
-          }
+          { bottom: tabBarHeight }
         ]}>
           <Player
             track={currentTrack}
             onClose={clearQueue}
-            isExpanded={showExpanded}
-            onExpandChange={setShowExpanded}
-            // ✅ SOLO AGREGAMOS ESTAS PROPS NUEVAS
-            onNext={playNext}
-            onPrev={playPrevious}
-            hasNext={hasNext}
-            hasPrev={hasPrev}
           />
         </View>
       )}

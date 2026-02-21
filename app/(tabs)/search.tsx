@@ -153,10 +153,7 @@ export default function SearchScreen() {
     }
   };
 
-  const handleToggleFavorite = async (track: TrackType) => {
-    const isFavorite = await storageService.toggleFavorite(track as StoredTrack);
-    return isFavorite;
-  };
+  // Eliminamos la función handleToggleFavorite ya que no se usa
 
   return (
     <View style={styles.container}>
@@ -170,7 +167,6 @@ export default function SearchScreen() {
         keyExtractor={(item) => item.id.toString()}
         renderItem={({ item, index }) => {
           if (!item) return null;
-          const isDownloaded = downloadedTracks.some(t => t.id === item.id);
           
           return (
             <TrackItem
@@ -180,9 +176,9 @@ export default function SearchScreen() {
               onPlay={handleTrackPress}
               onAddToPlaylist={handleAddToPlaylist}
               onDownload={handleDownload}
-              onToggleFavorite={handleToggleFavorite}
+              // Eliminamos onToggleFavorite
               showDownload={true}
-              showFavorite={true}
+              // Eliminamos showFavorite
             />
           );
         }}
