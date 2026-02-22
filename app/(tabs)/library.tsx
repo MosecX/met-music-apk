@@ -46,16 +46,16 @@ export default function LibraryScreen() {
     setPlaylists(loadedPlaylists);
   };
 
-  // Función para recargar la playlist seleccionada
+  // ✅ NUEVA FUNCIÓN: Recargar la playlist seleccionada
   const refreshSelectedPlaylist = async () => {
     if (!selectedPlaylist) return;
     
     const updatedPlaylists = await storageService.getPlaylists();
-    const updatedPlaylist = updatedPlaylists.find(p => p.id === selectedPlaylist.id);
+    const updated = updatedPlaylists.find(p => p.id === selectedPlaylist.id);
     
-    if (updatedPlaylist) {
-      setSelectedPlaylist(updatedPlaylist);
-      console.log('🔄 Playlist actualizada:', updatedPlaylist.name);
+    if (updated) {
+      setSelectedPlaylist(updated);
+      console.log('🔄 Playlist actualizada:', updated.name);
     }
   };
 
@@ -100,7 +100,7 @@ export default function LibraryScreen() {
     );
   };
 
-  // ✅ CORREGIDO: Ahora actualiza la playlist seleccionada después de descargar
+  // ✅ CORREGIDO: Actualiza la playlist después de descargar
   const handleDownloadPlaylist = async (playlist: Playlist) => {
     Alert.alert(
       'Descargar playlist',
@@ -129,7 +129,7 @@ export default function LibraryScreen() {
     );
   };
 
-  // ✅ CORREGIDO: Ahora actualiza la playlist seleccionada después de eliminar descargas
+  // ✅ CORREGIDO: Actualiza la playlist después de eliminar descargas
   const handleRemoveDownloads = async (playlist: Playlist) => {
     Alert.alert(
       'Eliminar descargas',
@@ -372,6 +372,7 @@ export default function LibraryScreen() {
               showDownload={true}
               showFavorite={true}
               onDownload={async (trackId) => {
+                // ✅ Recargar la playlist después de descargar una canción individual
                 setTimeout(() => refreshSelectedPlaylist(), 1000);
               }}
             />

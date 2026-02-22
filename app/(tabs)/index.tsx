@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -14,18 +14,21 @@ import ScreenWrapper from '../../components/ScreenWrapper';
 import TrackItem from '../../components/TrackItem';
 import { usePlayer } from '../../context/PlayerContext';
 import MonochromeAPI from '../../services/MonochromeAPI';
+import PlayHistoryService from '../../services/PlayHistoryService';
 import storageService from '../../services/storage';
+import { StoredTrack } from '../../types';
 
 const OFFLINE_MODE_KEY = '@offline_mode';
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
-  const [recommendations, setRecommendations] = useState<any[]>([]);
-  const [filteredRecommendations, setFilteredRecommendations] = useState<any[]>([]);
+  const [recommendations, setRecommendations] = useState<StoredTrack[]>([]);
+  const [filteredRecommendations, setFilteredRecommendations] = useState<StoredTrack[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [offlineMode, setOfflineMode] = useState(false);
-  const [downloadedTracks, setDownloadedTracks] = useState<any[]>([]);
+  const [downloadedTracks, setDownloadedTracks] = useState<StoredTrack[]>([]);
+  const [lastPlayedInfo, setLastPlayedInfo] = useState<string>('');
   const { currentTrack, playTrack } = usePlayer();
 
   const TAB_BAR_HEIGHT = 60;
@@ -35,7 +38,6 @@ export default function HomeScreen() {
   useEffect(() => {
     loadSettings();
     loadDownloads();
-    loadRecommendations();
   }, []);
 
   useEffect(() => {
@@ -47,10 +49,95 @@ export default function HomeScreen() {
     }
   }, [offlineMode, downloadedTracks, recommendations]);
 
+  // Cargar recomendaciones basadas en el historial
+  const loadRecommendations = useCallback(async () => {
+    try {
+      setLoading(true);
+      
+      console.log('🔍 CARGANDO RECOMENDACIONES');
+      console.log('🔍 Modo offline:', offlineMode);
+      
+      // DEBUG: Ver historial completo
+      const fullHistory = await PlayHistoryService.getHistory();
+      console.log('📊 HISTORIAL COMPLETO:', fullHistory.map(h => ({
+        cancion: h.track.title,
+        artista: h.track.artist,
+        cuando: new Date(h.playedAt).toLocaleTimeString()
+      })));
+      
+      // 1. Obtener IDs de canciones recientes del historial
+      const recentIds = await PlayHistoryService.getRecentTrackIds(5);
+      console.log('🎯 IDs recientes:', recentIds);
+      
+      const lastPlayed = await PlayHistoryService.getLastPlayed();
+      console.log('🎵 Última reproducida:', lastPlayed?.track.title);
+      
+      let tracks: StoredTrack[] = [];
+      
+      if (recentIds.length > 0) {
+        console.log('🎵 HAY HISTORIAL - IDs para recomendaciones:', recentIds);
+        
+        if (lastPlayed) {
+          setLastPlayedInfo(`Basado en: ${lastPlayed.track.title} ${lastPlayed.track.artist ? `- ${lastPlayed.track.artist}` : ''}`);
+        }
+        
+        // 2. Obtener recomendaciones basadas en el historial
+        console.log('🎵 Llamando a getRecommendationsFromHistory con IDs:', recentIds);
+        tracks = await MonochromeAPI.getRecommendationsFromHistory(recentIds, 30);
+        console.log('🎵 Recomendaciones obtenidas del historial:', tracks.length);
+        
+        // 3. Si hay pocas recomendaciones, complementar con generales
+        if (tracks.length < 10) {
+          console.log('🎵 Pocas recomendaciones basadas en historial, complementando con generales...');
+          const generalTracks = await MonochromeAPI.getRecommendations(424698825);
+          console.log('🎵 Recomendaciones generales obtenidas:', generalTracks.length);
+          
+          // Mezclar evitando duplicados
+          const existingIds = new Set(tracks.map(t => t.id));
+          const newTracks = generalTracks.filter(t => !existingIds.has(t.id));
+          
+          tracks = [...tracks, ...newTracks.slice(0, 10 - tracks.length)];
+          console.log('🎵 Total después de complementar:', tracks.length);
+        }
+      } else {
+        // No hay historial, mostrar recomendaciones por defecto
+        console.log('🎵 NO HAY HISTORIAL - mostrando recomendaciones generales');
+        setLastPlayedInfo('Recomendaciones para ti');
+        tracks = await MonochromeAPI.getRecommendations(424698825);
+        console.log('🎵 Recomendaciones generales:', tracks.length);
+      }
+      
+      // 4. Mezclar un poco para dar variedad pero mantener relevancia
+      const shuffled = [...tracks];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        if (Math.random() > 0.7) { // 30% de probabilidad de mezclar
+          const j = Math.floor(Math.random() * (i + 1));
+          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+      }
+      
+      setRecommendations(shuffled);
+      console.log('✅ Recomendaciones finales:', shuffled.length);
+      console.log('✅ Primeras 3 recomendaciones:', shuffled.slice(0, 3).map(t => t.title));
+      
+    } catch (error) {
+      console.log('❌ Error loading recommendations:', error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [offlineMode]); // Dependencia: offlineMode
+
+  // Efecto para cargar recomendaciones al montar y cuando cambia offlineMode
+  useEffect(() => {
+    loadRecommendations();
+  }, [offlineMode, loadRecommendations]);
+
   const loadSettings = async () => {
     try {
       const saved = await AsyncStorage.getItem(OFFLINE_MODE_KEY);
       setOfflineMode(saved === 'true');
+      console.log('⚙️ Modo offline cargado:', saved === 'true');
     } catch (error) {
       console.log('Error loading offline mode:', error);
     }
@@ -59,28 +146,11 @@ export default function HomeScreen() {
   const loadDownloads = async () => {
     const tracks = await storageService.getDownloadedTracks();
     setDownloadedTracks(tracks);
-  };
-
-  const loadRecommendations = async () => {
-    try {
-      const tracks = await MonochromeAPI.getRecommendations(424698825);
-      setRecommendations(tracks);
-      
-      if (offlineMode) {
-        const downloadedIds = downloadedTracks.map(t => t.id);
-        setFilteredRecommendations(tracks.filter(t => downloadedIds.includes(t.id)));
-      } else {
-        setFilteredRecommendations(tracks);
-      }
-    } catch (error) {
-      console.log('Error:', error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+    console.log('⬇️ Descargas cargadas:', tracks.length);
   };
 
   const handleRefresh = () => {
+    console.log('🔄 Refrescando recomendaciones...');
     setRefreshing(true);
     loadRecommendations();
   };
@@ -98,6 +168,7 @@ export default function HomeScreen() {
       
       console.log('🎵 Reproduciendo desde inicio:', {
         cancion: track.title,
+        artista: track.artist,
         totalEnCola: filteredRecommendations.length,
         indice: index
       });
@@ -132,6 +203,12 @@ export default function HomeScreen() {
           </View>
         )}
       </View>
+
+      {lastPlayedInfo && !offlineMode && (
+        <View style={styles.infoContainer}>
+          <Text style={styles.infoText}>{lastPlayedInfo}</Text>
+        </View>
+      )}
 
       {offlineMode && filteredRecommendations.length === 0 && (
         <View style={styles.offlineMessage}>
@@ -186,7 +263,7 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   header: {
     paddingTop: 40,
-    paddingBottom: 20,
+    paddingBottom: 10,
     paddingHorizontal: 20,
   },
   greeting: {
@@ -211,6 +288,15 @@ const styles = StyleSheet.create({
     color: '#1DB954',
     fontSize: 12,
     fontWeight: '600',
+  },
+  infoContainer: {
+    paddingHorizontal: 20,
+    paddingBottom: 10,
+  },
+  infoText: {
+    color: '#1DB954',
+    fontSize: 14,
+    fontStyle: 'italic',
   },
   offlineMessage: {
     alignItems: 'center',

@@ -1,4 +1,3 @@
-
 const RATE_LIMIT_ERROR_MESSAGE = 'Rate limit exceeded';
 
 // Interfaz para las instancias de API
@@ -266,6 +265,47 @@ class MonochromeAPI {
     } catch (error) {
       console.error('Error getting recommendations:', error);
       return [];
+    }
+  }
+
+  // NUEVO MÉTODO: Obtener recomendaciones basadas en múltiples IDs
+  async getRecommendationsFromHistory(trackIds: number[], limit: number = 20): Promise<any[]> {
+    if (trackIds.length === 0) {
+      return this.getRecommendations(424698825); // Fallback a default
+    }
+
+    try {
+      // Usar el ID más reciente para recomendaciones principales
+      const mainId = trackIds[0];
+      const mainRecommendations = await this.getRecommendations(mainId);
+      
+      // Si tenemos más IDs, obtener recomendaciones adicionales
+      if (trackIds.length > 1) {
+        const additionalIds = trackIds.slice(1, 3); // Usar hasta 3 IDs diferentes
+        const additionalPromises = additionalIds.map(id => this.getRecommendations(id));
+        const additionalResults = await Promise.all(additionalPromises);
+        
+        // Combinar todas las recomendaciones
+        const allRecommendations = [
+          ...mainRecommendations,
+          ...additionalResults.flat()
+        ];
+        
+        // Eliminar duplicados (por ID)
+        const uniqueTracks = Array.from(
+          new Map(allRecommendations.map(track => [track.id, track])).values()
+        );
+        
+        // Mezclar ligeramente para variedad
+        const shuffled = uniqueTracks.sort(() => Math.random() - 0.5);
+        
+        return shuffled.slice(0, limit);
+      }
+      
+      return mainRecommendations.slice(0, limit);
+    } catch (error) {
+      console.error('Error getting recommendations from history:', error);
+      return this.getRecommendations(424698825); // Fallback
     }
   }
 

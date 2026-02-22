@@ -1,6 +1,9 @@
 import { AudioMode, setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import MonochromeAPI from '../services/MonochromeAPI';
+import PlayHistoryService from '../services/PlayHistoryService';
+import PlaybackPersistenceService from '../services/PlaybackPersistenceService';
 import { QueueItem, StoredTrack } from '../types';
 
 interface PlayerContextType {
@@ -71,11 +74,197 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
   // Player
   const player = useAudioPlayer();
   const status = useAudioPlayerStatus(player);
+  
+  // Referencia para el intervalo de guardado
+  const saveIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // Flag para evitar múltiples restauraciones
+  const hasRestoredRef = useRef<boolean>(false);
 
   const currentTrack = currentIndex >= 0 ? queue[currentIndex] : null;
   const hasNext = currentIndex < queue.length - 1;
   const hasPrev = currentIndex > 0;
   const queueLength = queue.length;
+
+  // Cargar estado guardado al iniciar (solo una vez)
+  useEffect(() => {
+    if (hasRestoredRef.current) return;
+    
+    const loadSavedState = async () => {
+      console.log('🔄 Cargando estado guardado...');
+      
+      const { queue: savedQueue, originalQueue: savedOriginalQueue, state } = 
+        await PlaybackPersistenceService.loadPlaybackState();
+      
+      if (savedQueue.length > 0 && state && state.currentIndex >= 0 && state.currentIndex < savedQueue.length) {
+        console.log('📦 Restaurando estado guardado:', {
+          queueLength: savedQueue.length,
+          currentIndex: state.currentIndex,
+          position: state.position,
+          isPlaying: state.isPlaying,
+          shuffleMode: state.shuffleMode,
+          repeatMode: state.repeatMode
+        });
+        
+        // Restaurar estados
+        setQueue(savedQueue);
+        setOriginalQueue(savedOriginalQueue);
+        setCurrentIndex(state.currentIndex);
+        setShuffleMode(state.shuffleMode);
+        setRepeatMode(state.repeatMode);
+        
+        hasRestoredRef.current = true;
+        
+        // Pequeño delay para asegurar que los estados se actualizaron
+        setTimeout(async () => {
+          // Restaurar la canción en el player
+          if (player && savedQueue[state.currentIndex]) {
+            const track = savedQueue[state.currentIndex];
+            console.log('🎵 Restaurando canción:', track.title);
+            
+            let audioSource = track.localUri;
+            
+            if (!audioSource) {
+              console.log('🎵 Obteniendo URL para restaurar:', track.title);
+              audioSource = await MonochromeAPI.getPlayableUrl(track.id);
+            }
+            
+            if (audioSource) {
+              player.replace(audioSource);
+              
+              // Dar tiempo al player para cargar
+              setTimeout(() => {
+                if (state.position > 0) {
+                  console.log('⏱️ Restaurando posición:', state.position);
+                  player.seekTo(state.position);
+                }
+                
+                // SIEMPRE INICIAR PAUSADO - ignoramos el estado guardado
+                console.log('⏸️ App restaurada - modo pausado por defecto');
+                // No llamamos a player.play() aunque state.isPlaying sea true
+                // El player se queda en pausa automáticamente
+                
+              }, 500);
+              
+              setShowExpanded(true);
+            }
+          }
+        }, 100);
+      } else {
+        console.log('📦 No hay estado guardado válido para restaurar');
+        hasRestoredRef.current = true;
+      }
+    };
+    
+    loadSavedState();
+  }, [player]); // Solo depende de player
+
+  // Guardar estado periódicamente
+  useEffect(() => {
+    if (!player || currentIndex < 0 || !hasRestoredRef.current) return;
+    
+    // Solo iniciar si no hay un intervalo ya corriendo
+    if (!saveIntervalRef.current) {
+      console.log('⏱️ Iniciando guardado periódico');
+      
+      const intervalId = setInterval(() => {
+        if (currentTrack) {
+          PlaybackPersistenceService.savePlaybackState(
+            queue,
+            originalQueue,
+            currentIndex,
+            status?.currentTime || 0,
+            status?.playing || false,
+            shuffleMode,
+            repeatMode
+          );
+        }
+      }, 3000);
+      
+      saveIntervalRef.current = intervalId as unknown as NodeJS.Timeout;
+    }
+    
+    return () => {
+      if (saveIntervalRef.current) {
+        clearInterval(saveIntervalRef.current as unknown as number);
+        saveIntervalRef.current = null;
+      }
+    };
+  }, [player, currentIndex, hasRestoredRef.current, currentTrack, queue, originalQueue, status, shuffleMode, repeatMode]);
+
+  // Guardar cuando cambia la canción
+  useEffect(() => {
+    if (!hasRestoredRef.current || !currentTrack || currentIndex < 0) return;
+    
+    console.log('🎵 Canción cambiada, guardando estado...');
+    PlaybackPersistenceService.savePlaybackState(
+      queue,
+      originalQueue,
+      currentIndex,
+      status?.currentTime || 0,
+      status?.playing || false,
+      shuffleMode,
+      repeatMode
+    );
+  }, [currentIndex]);
+
+  // Guardar cuando cambia play/pause
+  useEffect(() => {
+    if (!hasRestoredRef.current || !currentTrack || currentIndex < 0) return;
+    
+    console.log('⏯️ Estado de reproducción cambiado, guardando...');
+    PlaybackPersistenceService.savePlaybackState(
+      queue,
+      originalQueue,
+      currentIndex,
+      status?.currentTime || 0,
+      status?.playing || false,
+      shuffleMode,
+      repeatMode
+    );
+  }, [status?.playing]);
+
+  // Guardar cuando cambian los modos
+  useEffect(() => {
+    if (!hasRestoredRef.current || !currentTrack || currentIndex < 0) return;
+    
+    console.log('🔄 Modos cambiados, guardando...');
+    PlaybackPersistenceService.savePlaybackState(
+      queue,
+      originalQueue,
+      currentIndex,
+      status?.currentTime || 0,
+      status?.playing || false,
+      shuffleMode,
+      repeatMode
+    );
+  }, [shuffleMode, repeatMode]);
+
+  // Guardar al cambiar estado de la app (background/foreground)
+  useEffect(() => {
+    const handleAppStateChange = async (nextAppState: string) => {
+      if (nextAppState === 'background' || nextAppState === 'inactive') {
+        console.log('📱 App en background, guardando estado final...');
+        
+        if (currentTrack && currentIndex >= 0) {
+          await PlaybackPersistenceService.savePlaybackState(
+            queue,
+            originalQueue,
+            currentIndex,
+            status?.currentTime || 0,
+            status?.playing || false,
+            shuffleMode,
+            repeatMode
+          );
+        }
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    
+    return () => {
+      subscription.remove();
+    };
+  }, [queue, originalQueue, currentIndex, status, shuffleMode, repeatMode, currentTrack]);
 
   // Log para debug
   useEffect(() => {
@@ -84,9 +273,10 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
       total: queue.length,
       currentTrack: currentTrack?.title,
       shuffleMode,
-      repeatMode
+      repeatMode,
+      isPlaying: status?.playing
     });
-  }, [queue, currentIndex, shuffleMode, repeatMode]);
+  }, [queue, currentIndex, shuffleMode, repeatMode, currentTrack, status?.playing]);
 
   // Configurar audio
   useEffect(() => {
@@ -127,6 +317,11 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     playlistId?: string
   ) => {
     try {
+      console.log('🎵 playTrack llamado:', track.title, 'source:', source);
+      
+      // GUARDAR EN HISTORIAL
+      await PlayHistoryService.addToHistory(track, source, playlistId);
+      
       // Convertir todos los tracks a QueueItems
       const queueItems = tracks.map(t => toQueueItem(t, source, playlistId));
       
@@ -321,6 +516,9 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     setQueue([]);
     setOriginalQueue([]);
     setCurrentIndex(-1);
+    
+    // Limpiar estado guardado
+    await PlaybackPersistenceService.clearPlaybackState();
   };
 
   // Mover en la cola
