@@ -46,6 +46,19 @@ export default function LibraryScreen() {
     setPlaylists(loadedPlaylists);
   };
 
+  // Función para recargar la playlist seleccionada
+  const refreshSelectedPlaylist = async () => {
+    if (!selectedPlaylist) return;
+    
+    const updatedPlaylists = await storageService.getPlaylists();
+    const updatedPlaylist = updatedPlaylists.find(p => p.id === selectedPlaylist.id);
+    
+    if (updatedPlaylist) {
+      setSelectedPlaylist(updatedPlaylist);
+      console.log('🔄 Playlist actualizada:', updatedPlaylist.name);
+    }
+  };
+
   const createPlaylist = async () => {
     if (!newPlaylistName.trim()) return;
     
@@ -55,7 +68,6 @@ export default function LibraryScreen() {
     setShowNewPlaylistModal(false);
   };
 
-  // ✅ FUNCIÓN CORREGIDA - Maneja modo offline
   const handleTrackPress = (track: StoredTrack, index: number) => {
     if (!selectedPlaylist) return;
     
@@ -88,6 +100,7 @@ export default function LibraryScreen() {
     );
   };
 
+  // ✅ CORREGIDO: Ahora actualiza la playlist seleccionada después de descargar
   const handleDownloadPlaylist = async (playlist: Playlist) => {
     Alert.alert(
       'Descargar playlist',
@@ -100,7 +113,13 @@ export default function LibraryScreen() {
             const success = await storageService.downloadPlaylist(playlist.id);
             if (success) {
               Alert.alert('✅ Completado', 'Playlist descargada correctamente');
-              loadData();
+              
+              // ✅ ACTUALIZAR la playlist seleccionada si es la misma
+              if (selectedPlaylist && selectedPlaylist.id === playlist.id) {
+                await refreshSelectedPlaylist();
+              }
+              
+              await loadData(); // Recargar lista principal
             } else {
               Alert.alert('❌ Error', 'Hubo un problema al descargar la playlist');
             }
@@ -110,6 +129,7 @@ export default function LibraryScreen() {
     );
   };
 
+  // ✅ CORREGIDO: Ahora actualiza la playlist seleccionada después de eliminar descargas
   const handleRemoveDownloads = async (playlist: Playlist) => {
     Alert.alert(
       'Eliminar descargas',
@@ -125,7 +145,13 @@ export default function LibraryScreen() {
                 await storageService.removeDownloadedTrack(track.id);
               }
             }
-            loadData();
+            
+            // ✅ ACTUALIZAR la playlist seleccionada si es la misma
+            if (selectedPlaylist && selectedPlaylist.id === playlist.id) {
+              await refreshSelectedPlaylist();
+            }
+            
+            await loadData();
             Alert.alert('✅ Eliminadas', 'Descargas eliminadas correctamente');
           }
         }
@@ -346,7 +372,7 @@ export default function LibraryScreen() {
               showDownload={true}
               showFavorite={true}
               onDownload={async (trackId) => {
-                setTimeout(() => loadData(), 1000);
+                setTimeout(() => refreshSelectedPlaylist(), 1000);
               }}
             />
           )}

@@ -1,15 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useState } from 'react';
 import {
-    Alert,
-    FlatList,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    TouchableOpacity,
-    View,
+  Alert,
+  FlatList,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import ScreenWrapper from '../../components/ScreenWrapper';
 import TrackItem from '../../components/TrackItem';
@@ -44,41 +44,6 @@ export default function SettingsScreen() {
   const loadDownloads = async () => {
     const tracks = await storageService.getDownloadedTracks();
     setDownloadedTracks(tracks);
-  };
-
-  const handleToggleOffline = async (value: boolean) => {
-    setOfflineMode(value);
-    await AsyncStorage.setItem(OFFLINE_MODE_KEY, value.toString());
-    
-    Alert.alert(
-      'Modo Offline',
-      value 
-        ? 'Solo se mostrarán y reproducirán canciones descargadas' 
-        : 'Modo offline desactivado'
-    );
-  };
-
-  const handleClearAllDownloads = () => {
-    Alert.alert(
-      'Eliminar todas las descargas',
-      `¿Eliminar ${downloadedTracks.length} canciones del almacenamiento local?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar todo',
-          style: 'destructive',
-          onPress: async () => {
-            for (const track of downloadedTracks) {
-              if (track.localUri) {
-                await storageService.removeDownloadedTrack(track.id);
-              }
-            }
-            loadDownloads();
-            Alert.alert('✅ Eliminadas', 'Todas las descargas fueron eliminadas');
-          }
-        }
-      ]
-    );
   };
 
   const handleTrackPress = (track: StoredTrack) => {
@@ -154,43 +119,55 @@ export default function SettingsScreen() {
           <Text style={styles.title}>Configuración</Text>
         </View>
 
-        {/* Sección de Offline */}
+        {/* Sección de Estado de Conexión - MEJORADA */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>📶 Conexión</Text>
+          <Text style={styles.sectionTitle}>📶 Estado de conexión</Text>
           
-          <View style={styles.settingItem}>
-            <View style={styles.settingInfo}>
-              <Ionicons name="airplane" size={24} color="#1DB954" />
-              <View style={styles.settingTexts}>
-                <Text style={styles.settingTitle}>Modo offline</Text>
-                <Text style={styles.settingDescription}>
-                  {offlineMode 
-                    ? 'Solo canciones descargadas' 
-                    : 'Mostrar todas las canciones'}
+          <LinearGradient
+            colors={isNetworkOffline 
+              ? ['rgba(255,68,68,0.2)', 'rgba(255,68,68,0.05)'] 
+              : ['rgba(29,185,84,0.2)', 'rgba(29,185,84,0.05)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.networkCard}
+          >
+            <View style={styles.networkStatusContainer}>
+              <View style={[styles.networkIconContainer, { 
+                backgroundColor: isNetworkOffline 
+                  ? 'rgba(255,68,68,0.15)' 
+                  : 'rgba(29,185,84,0.15)' 
+              }]}>
+                <Ionicons 
+                  name={isNetworkOffline ? 'cloud-offline' : 'cloud'} 
+                  size={28} 
+                  color={isNetworkOffline ? '#FF4444' : '#1DB954'} 
+                />
+              </View>
+              
+              <View style={styles.networkTextContainer}>
+                <Text style={styles.networkStatusTitle}>
+                  {isNetworkOffline ? 'Sin conexión' : 'Conectado a internet'}
+                </Text>
+                <Text style={styles.networkStatusDetail}>
+                  {isNetworkOffline 
+                    ? 'Reproduciendo solo canciones descargadas' 
+                    : 'Puedes buscar y reproducir cualquier canción'}
                 </Text>
               </View>
             </View>
-            <Switch
-              value={offlineMode}
-              onValueChange={handleToggleOffline}
-              trackColor={{ false: '#3E3E3E', true: '#1DB954' }}
-              thumbColor="#FFF"
-            />
-          </View>
-
-          <View style={styles.networkStatus}>
-            <Ionicons 
-              name={isNetworkOffline ? 'cloud-offline' : 'cloud'} 
-              size={20} 
-              color={isNetworkOffline ? '#FF4444' : '#1DB954'} 
-            />
-            <Text style={[
-              styles.networkStatusText,
-              { color: isNetworkOffline ? '#FF4444' : '#1DB954' }
-            ]}>
-              {isNetworkOffline ? 'Sin conexión a internet' : 'Conectado'}
-            </Text>
-          </View>
+            
+            <View style={[styles.networkBadge, { 
+              backgroundColor: isNetworkOffline 
+                ? 'rgba(255,68,68,0.15)' 
+                : 'rgba(29,185,84,0.15)' 
+            }]}>
+              <Text style={[styles.networkBadgeText, { 
+                color: isNetworkOffline ? '#FF4444' : '#1DB954' 
+              }]}>
+                {offlineMode ? 'MODO OFFLINE' : 'MODO ONLINE'}
+              </Text>
+            </View>
+          </LinearGradient>
         </View>
 
         {/* Sección de Almacenamiento */}
@@ -202,7 +179,9 @@ export default function SettingsScreen() {
             onPress={() => setShowDownloads(true)}
           >
             <View style={styles.storageInfo}>
-              <Ionicons name="cloud-done" size={32} color="#1DB954" />
+              <View style={styles.storageIconContainer}>
+                <Ionicons name="cloud-done" size={28} color="#1DB954" />
+              </View>
               <View>
                 <Text style={styles.storageTitle}>Canciones descargadas</Text>
                 <Text style={styles.storageSubtitle}>
@@ -210,13 +189,34 @@ export default function SettingsScreen() {
                 </Text>
               </View>
             </View>
-            <Ionicons name="chevron-forward" size={24} color="#666" />
+            <Ionicons name="chevron-forward" size={22} color="#666" />
           </TouchableOpacity>
 
           {downloadedTracks.length > 0 && (
             <TouchableOpacity
               style={styles.clearButton}
-              onPress={handleClearAllDownloads}
+              onPress={() => {
+                Alert.alert(
+                  'Eliminar todas las descargas',
+                  `¿Eliminar ${downloadedTracks.length} canciones del almacenamiento local?`,
+                  [
+                    { text: 'Cancelar', style: 'cancel' },
+                    {
+                      text: 'Eliminar todo',
+                      style: 'destructive',
+                      onPress: async () => {
+                        for (const track of downloadedTracks) {
+                          if (track.localUri) {
+                            await storageService.removeDownloadedTrack(track.id);
+                          }
+                        }
+                        loadDownloads();
+                        Alert.alert('✅ Eliminadas', 'Todas las descargas fueron eliminadas');
+                      }
+                    }
+                  ]
+                );
+              }}
             >
               <Ionicons name="trash-outline" size={20} color="#FF4444" />
               <Text style={styles.clearButtonText}>Eliminar todas las descargas</Text>
@@ -238,10 +238,18 @@ export default function SettingsScreen() {
               <Text style={styles.infoValue}>14 activos</Text>
             </View>
             <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Modo offline</Text>
-              <Text style={[styles.infoValue, { color: offlineMode ? '#1DB954' : '#666' }]}>
-                {offlineMode ? 'ACTIVADO' : 'DESACTIVADO'}
-              </Text>
+              <Text style={styles.infoLabel}>Modo actual</Text>
+              <View style={[styles.statusChip, { 
+                backgroundColor: offlineMode 
+                  ? 'rgba(29,185,84,0.15)' 
+                  : 'rgba(255,255,255,0.1)' 
+              }]}>
+                <Text style={[styles.statusChipText, { 
+                  color: offlineMode ? '#1DB954' : '#666' 
+                }]}>
+                  {offlineMode ? 'OFFLINE' : 'ONLINE'}
+                </Text>
+              </View>
             </View>
           </View>
         </View>
@@ -272,60 +280,74 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     marginLeft: 4,
   },
-  settingItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#1E1E1E',
+  // Nuevo estilo para el card de conexión
+  networkCard: {
+    borderRadius: 16,
     padding: 16,
-    borderRadius: 12,
     marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
   },
-  settingInfo: {
+  networkStatusContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
-    gap: 12,
+    marginBottom: 12,
   },
-  settingTexts: {
+  networkIconContainer: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  networkTextContainer: {
     flex: 1,
   },
-  settingTitle: {
+  networkStatusTitle: {
     color: '#FFF',
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 2,
   },
-  settingDescription: {
+  networkStatusDetail: {
     color: '#B3B3B3',
+    fontSize: 13,
+  },
+  networkBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  networkBadgeText: {
     fontSize: 12,
+    fontWeight: '600',
   },
-  networkStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1E1E1E',
-    padding: 12,
-    borderRadius: 12,
-    gap: 8,
-    marginTop: 4,
-  },
-  networkStatusText: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
+  // Estilos existentes mejorados
   storageCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: '#1E1E1E',
     padding: 16,
-    borderRadius: 12,
+    borderRadius: 16,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
   },
   storageInfo: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+  },
+  storageIconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: 'rgba(29,185,84,0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   storageTitle: {
     color: '#FFF',
@@ -345,6 +367,8 @@ const styles = StyleSheet.create({
     padding: 14,
     borderRadius: 12,
     gap: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,68,68,0.2)',
   },
   clearButtonText: {
     color: '#FF4444',
@@ -354,12 +378,15 @@ const styles = StyleSheet.create({
   infoCard: {
     backgroundColor: '#1E1E1E',
     padding: 16,
-    borderRadius: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
   },
   infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 8,
+    alignItems: 'center',
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#2A2A2A',
   },
@@ -372,32 +399,43 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  statusChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  statusChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
   // Estadísticas
   statsContainer: {
     flexDirection: 'row',
     backgroundColor: '#1E1E1E',
     margin: 16,
-    padding: 16,
-    borderRadius: 12,
+    padding: 20,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'space-around',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
   },
   statItem: {
     alignItems: 'center',
   },
   statNumber: {
     color: '#1DB954',
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: 'bold',
   },
   statLabel: {
     color: '#B3B3B3',
-    fontSize: 12,
-    marginTop: 2,
+    fontSize: 13,
+    marginTop: 4,
   },
   statDivider: {
     width: 1,
-    height: 30,
+    height: 40,
     backgroundColor: '#2A2A2A',
   },
   listContent: {

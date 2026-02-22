@@ -1,23 +1,25 @@
-name: Build MetMusic APK
+name: Build MetMusic APK and Release
 
 on:
   push:
     branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 jobs:
   build:
     name: Build Android APK
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     
     steps:
       # 1. Checkout del código
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Setup Node.js (versión 20)
+      # 2. Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -35,19 +37,34 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      # 5. Instalar dependencias
+      # 5. Obtener versión del package.json
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Versión: $VERSION"
+
+      # 6. Instalar dependencias
       - name: Install dependencies
         run: npm ci
 
-      # 6. Expo doctor (no falla el build si hay warnings)
+      # 7. Expo doctor
       - name: Run expo doctor
         run: npx expo-doctor || true
 
-      # 7. Prebuild (genera carpeta android)
+      # 8. ACTUALIZAR VERSIONCODE con el número del workflow
+      - name: Update versionCode
+        run: |
+          jq '.expo.android.versionCode = ${{ github.run_number }}' app.json > app.tmp.json
+          mv app.tmp.json app.json
+          echo "✅ versionCode actualizado a ${{ github.run_number }}"
+
+      # 9. Prebuild
       - name: Expo prebuild
         run: npx expo prebuild --clean
 
-      # 8. Cache de Gradle
+      # 10. Cache de Gradle
       - name: Cache Gradle
         uses: actions/cache@v3
         with:
@@ -58,36 +75,109 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      # 9. Hacer ejecutable gradlew
+      # 11. Make gradlew executable
       - name: Make gradlew executable
         run: cd android && chmod +x gradlew
 
-      # 10. Build RELEASE APK
-      - name: Build release APK
+      # 12. CREAR KEYSTORE desde secrets
+      - name: Create keystore from secrets
+        run: |
+          echo "${{ secrets.KEY_STORE }}" | base64 -d > keystore.jks
+          echo "✅ Keystore creado desde secrets"
+
+      # 13. CONFIGURAR FIRMA en build.gradle (CORREGIDO)
+      - name: Configure signing
+        run: |
+          # Agregar configuración de firma al final de build.gradle
+          cat >> android/app/build.gradle << 'EOF'
+          
+          android {
+              signingConfigs {
+                  release {
+                      storeFile file('../../keystore.jks')
+                      storePassword "${{ secrets.KEY_STORE_PASS }}"
+                      keyAlias "${{ secrets.KEY_ALIAS }}"
+                      keyPassword "${{ secrets.KEY_PASS }}"
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                  }
+              }
+          }
+          EOF
+          echo "✅ Firma configurada en build.gradle"
+
+      # 14. BUILD FIRMADO
+      - name: Build signed release APK
         run: |
           cd android
           ./gradlew assembleRelease --stacktrace
 
-      # 11. 🔍 Buscar el APK generado
-      - name: Find APK
-        id: find_apk
+      # 15. ENCONTRAR y preparar el APK
+      - name: Prepare APK for release
+        id: prepare_apk
         run: |
+          # Buscar el APK (ahora será app-release.apk)
           APK_PATH=$(find android/app/build/outputs -name "*.apk" | head -n 1)
           echo "📍 APK encontrado en: $APK_PATH"
-          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
-          echo "📦 Tamaño del APK:"
-          ls -lh $APK_PATH
+          
+          # Crear nombre para el release
+          DATE=$(date +'%Y%m%d')
+          APK_NAME="MetMusic-v${{ steps.version.outputs.version }}-build${{ github.run_number }}.apk"
+          
+          # Copiar a la raíz con nombre legible
+          cp "$APK_PATH" "./$APK_NAME"
+          echo "📦 APK preparado: $APK_NAME"
+          
+          # Guardar variables
+          echo "apk_name=$APK_NAME" >> $GITHUB_OUTPUT
+          echo "apk_path=./$APK_NAME" >> $GITHUB_OUTPUT
 
-      # 12. ✅ Subir APK (con el nombre correcto)
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: MetMusic-APK-${{ github.sha }}
-          path: ${{ steps.find_apk.outputs.apk_path }}
-          retention-days: 30
-
-      # 13. 📊 Mostrar todos los APKs (debug)
-      - name: Show all APKs
+      # 16. Crear Tag (si no existe)
+      - name: Create Tag
         run: |
-          echo "📁 Todos los APKs generados:"
-          find android/app/build/outputs -name "*.apk" | xargs ls -lh
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          TAG_NAME="v${{ steps.version.outputs.version }}"
+          git tag -f $TAG_NAME
+          git push origin $TAG_NAME --force
+        continue-on-error: true
+
+      # 17. Crear Release
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: MetMusic v${{ steps.version.outputs.version }}
+          body: |
+            ## 🎵 MetMusic v${{ steps.version.outputs.version }}
+            
+            ### ✅ Cambios en esta versión:
+            - Build: ${{ github.run_number }}
+            - Commit: ${{ github.sha }}
+            
+            ### 📱 Instalación:
+            1. Descarga el APK
+            2. Permite instalación de orígenes desconocidos
+            3. Instala y disfruta 🎧
+            
+            ### 🔧 Detalles técnicos:
+            - Fecha: $(date +'%d/%m/%Y %H:%M')
+            - versionCode: ${{ github.run_number }}
+            - **APK FIRMADO**: ✅ Puedes actualizar sin desinstalar
+          files: ${{ steps.prepare_apk.outputs.apk_path }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 18. Verificación final
+      - name: Show result
+        run: |
+          echo "🎉 ¡RELEASE COMPLETADO!"
+          echo "📱 APK firmado subido: ${{ steps.prepare_apk.outputs.apk_name }}"
+          echo "🔗 Ver release en:"
+          echo "https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.version }}"
