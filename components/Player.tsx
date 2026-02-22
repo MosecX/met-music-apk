@@ -1,4 +1,4 @@
-// components/Player.tsx - VERSIÓN ADAPTADA PARA TABBAR TRANSPARENTE
+// components/Player.tsx - VERSIÓN COMPLETA CON MODALES FUNCIONALES
 import { Ionicons } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
 import { BlurView } from 'expo-blur';
@@ -9,6 +9,7 @@ import {
   Animated,
   Dimensions,
   Image,
+  Linking,
   Modal,
   ScrollView,
   StyleSheet,
@@ -442,7 +443,7 @@ const Player = ({ track, onClose }: PlayerProps) => {
             
             <View style={styles.coverWrapper}>
               <LinearGradient
-                colors={['rgba(236,72,153,0.3)', 'transparent']}
+                colors={['rgba(29,185,84,0.3)', 'transparent']}
                 style={styles.coverGlow}
               />
               <Image 
@@ -566,25 +567,171 @@ const Player = ({ track, onClose }: PlayerProps) => {
           </ScrollView>
         </Reanimated.View>
 
-        {/* Modales (sin cambios) */}
+        {/* MODAL DE LETRAS - COMPLETO */}
         <Modal
           visible={lyricsVisible && isExpanded}
           transparent
           animationType="fade"
           onRequestClose={() => setLyricsVisible(false)}
         >
-          {/* ... contenido del modal de letras ... */}
+          <View style={styles.modalOverlay}>
+            <LinearGradient
+              colors={['#0A0A0A', '#1A1A1A']}
+              style={StyleSheet.absoluteFill}
+            />
+            <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
+            <View 
+              style={[styles.modalContent, { paddingTop: insets.top + 20 }]}
+              onLayout={(event) => {
+                const { height } = event.nativeEvent.layout;
+                setLyricsContainerHeight(height - 140);
+              }}
+            >
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>LETRAS</Text>
+                <TouchableOpacity onPress={() => setLyricsVisible(false)} style={styles.modalCloseButton}>
+                  <Ionicons name="close" size={22} color="#FFF" />
+                </TouchableOpacity>
+              </View>
+
+              {loadingLyrics ? (
+                <View style={styles.lyricsLoading}>
+                  <ActivityIndicator size="large" color="#1DB954" />
+                  <Text style={styles.lyricsLoadingText}>Buscando letras...</Text>
+                </View>
+              ) : lyrics.length > 0 ? (
+                <ScrollView 
+                  ref={lyricsScrollRef}
+                  style={styles.lyricsScroll}
+                  contentContainerStyle={styles.lyricsContent}
+                  showsVerticalScrollIndicator={false}
+                  scrollEventThrottle={16}
+                >
+                  {lyrics.map((line, index) => (
+                    <View
+                      key={index}
+                      onLayout={(event) => {
+                        if (index === 0) {
+                          setLyricsItemHeight(event.nativeEvent.layout.height);
+                        }
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.lyricLine,
+                          currentLyric === line.text && styles.activeLyric
+                        ]}
+                      >
+                        {line.text}
+                      </Text>
+                    </View>
+                  ))}
+                </ScrollView>
+              ) : unsyncedLyrics.length > 0 ? (
+                <ScrollView style={styles.lyricsScroll}>
+                  {unsyncedLyrics.map((line, index) => (
+                    <Text key={index} style={styles.unsyncedLine}>
+                      {line}
+                    </Text>
+                  ))}
+                </ScrollView>
+              ) : (
+                <View style={styles.noLyrics}>
+                  <Ionicons name="musical-notes-outline" size={70} color="rgba(255,255,255,0.2)" />
+                  <Text style={styles.noLyricsTitle}>Sin letras disponibles</Text>
+                  <Text style={styles.noLyricsSubtitle}>
+                    Puedes buscar en línea:
+                  </Text>
+                  <TouchableOpacity 
+                    style={styles.lyricsLink}
+                    onPress={() => {
+                      const query = encodeURIComponent(`${track.title} ${track.artist} lyrics`);
+                      Linking.openURL(`https://google.com/search?q=${query}`);
+                    }}
+                  >
+                    <Ionicons name="logo-google" size={18} color="#1DB954" />
+                    <Text style={styles.lyricsLinkText}>Buscar en Google</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={styles.lyricsLink}
+                    onPress={() => {
+                      const query = encodeURIComponent(`${track.title} ${track.artist}`);
+                      Linking.openURL(`https://genius.com/search?q=${query}`);
+                    }}
+                  >
+                    <Ionicons name="musical-notes" size={18} color="#FFD700" />
+                    <Text style={styles.lyricsLinkText}>Buscar en Genius</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {lyricsProvider && lyricsProvider !== 'fallback' && (
+                <Text style={styles.providerText}>
+                  Fuente: {lyricsProvider.toUpperCase()}
+                </Text>
+              )}
+            </View>
+          </View>
         </Modal>
 
+        {/* MODAL DE COLA - COMPLETO */}
         <Modal
           visible={showQueue && isExpanded}
           transparent
           animationType="slide"
           onRequestClose={() => setShowQueue(false)}
         >
-          {/* ... contenido del modal de cola ... */}
+          <View style={styles.modalOverlay}>
+            <LinearGradient
+              colors={['#0A0A0A', '#1A1A1A']}
+              style={StyleSheet.absoluteFill}
+            />
+            <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
+            <View style={[styles.modalContent, styles.queueModal, { paddingTop: insets.top + 20 }]}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>COLA DE REPRODUCCIÓN</Text>
+                <TouchableOpacity onPress={() => setShowQueue(false)} style={styles.modalCloseButton}>
+                  <Ionicons name="close" size={22} color="#FFF" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView style={styles.queueList} showsVerticalScrollIndicator={false}>
+                {queue.map((item, index) => {
+                  const uniqueKey = item.queueId || `${item.id}-${index}`;
+                  
+                  return (
+                    <TouchableOpacity 
+                      key={uniqueKey}
+                      style={[
+                        styles.queueItem,
+                        index === currentPosition && styles.queueItemActive
+                      ]}
+                      onPress={() => handleQueueItemPress(index)}
+                      activeOpacity={0.7}
+                    >
+                      <Image source={{ uri: item.coverUrl }} style={styles.queueItemImage} />
+                      <View style={styles.queueItemInfo}>
+                        <Text style={styles.queueItemTitle} numberOfLines={1}>
+                          {item.title}
+                        </Text>
+                        <Text style={styles.queueItemArtist} numberOfLines={1}>
+                          {item.artist}
+                        </Text>
+                      </View>
+                      {index === currentPosition && (
+                        <View style={styles.playingIndicator}>
+                          <Ionicons name="play" size={14} color="#1DB954" />
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          </View>
         </Modal>
 
+        {/* Modal para agregar a playlist */}
         <AddToPlaylistModal
           visible={showPlaylistModal && isExpanded}
           onClose={() => setShowPlaylistModal(false)}
@@ -611,7 +758,7 @@ const styles = StyleSheet.create({
     width: 200,
     height: 200,
     borderRadius: 100,
-    backgroundColor: 'rgba(236,72,153,0.1)',
+    backgroundColor: 'rgba(29,185,84,0.05)',
     top: -50,
     right: -50,
   },
@@ -620,7 +767,7 @@ const styles = StyleSheet.create({
     width: 150,
     height: 150,
     borderRadius: 75,
-    backgroundColor: 'rgba(168,85,247,0.1)',
+    backgroundColor: 'rgba(29,185,84,0.03)',
     bottom: -30,
     left: -30,
   },
@@ -681,7 +828,7 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: 'rgba(236,72,153,0.15)',
+    backgroundColor: 'rgba(29,185,84,0.15)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -864,8 +1011,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.1)',
   },
   expandedActionButtonActive: {
-    backgroundColor: 'rgba(236,72,153,0.15)',
-    borderColor: 'rgba(236,72,153,0.3)',
+    backgroundColor: 'rgba(29,185,84,0.15)',
+    borderColor: 'rgba(29,185,84,0.3)',
   },
   expandedActionText: {
     color: '#FFF',
@@ -875,7 +1022,160 @@ const styles = StyleSheet.create({
   expandedActionTextActive: {
     color: '#1DB954',
   },
-  // ... resto de estilos para modales (sin cambios) ...
+  // Estilos para modales
+  modalOverlay: {
+    flex: 1,
+  },
+  modalContent: {
+    flex: 1,
+    padding: 20,
+  },
+  queueModal: {
+    marginTop: 0,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '600',
+    letterSpacing: 1,
+  },
+  modalCloseButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  lyricsScroll: {
+    flex: 1,
+  },
+  lyricsContent: {
+    paddingVertical: 20,
+  },
+  lyricLine: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 16,
+    textAlign: 'center',
+    marginVertical: 8,
+    lineHeight: 24,
+    paddingHorizontal: 20,
+  },
+  activeLyric: {
+    color: '#1DB954',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  unsyncedLine: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 16,
+    textAlign: 'center',
+    marginVertical: 4,
+    lineHeight: 24,
+    paddingHorizontal: 20,
+  },
+  lyricsLoading: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  lyricsLoadingText: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 14,
+    marginTop: 12,
+  },
+  noLyrics: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingBottom: 40,
+  },
+  noLyricsTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#FFF',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  noLyricsSubtitle: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 14,
+    marginBottom: 16,
+  },
+  lyricsLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 25,
+    marginVertical: 6,
+    width: '80%',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  lyricsLinkText: {
+    color: '#FFF',
+    fontSize: 15,
+    flex: 1,
+  },
+  providerText: {
+    color: 'rgba(255,255,255,0.3)',
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 10,
+  },
+  queueList: {
+    flex: 1,
+  },
+  queueItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+  },
+  queueItemActive: {
+    backgroundColor: 'rgba(29,185,84,0.1)',
+    borderColor: 'rgba(29,185,84,0.3)',
+  },
+  queueItemImage: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  queueItemInfo: {
+    flex: 1,
+  },
+  queueItemTitle: {
+    color: '#FFF',
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  queueItemArtist: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 13,
+  },
+  playingIndicator: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(29,185,84,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
 });
 
 export default Player;
