@@ -1,8 +1,12 @@
+import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   FlatList,
   RefreshControl,
   StyleSheet,
@@ -18,7 +22,10 @@ import PlayHistoryService from '../../services/PlayHistoryService';
 import storageService from '../../services/storage';
 import { StoredTrack } from '../../types';
 
+const { width } = Dimensions.get('window');
 const OFFLINE_MODE_KEY = '@offline_mode';
+const TAB_BAR_HEIGHT = 60;
+const PLAYER_HEIGHT = 80;
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
@@ -31,8 +38,6 @@ export default function HomeScreen() {
   const [lastPlayedInfo, setLastPlayedInfo] = useState<string>('');
   const { currentTrack, playTrack } = usePlayer();
 
-  const TAB_BAR_HEIGHT = 60;
-  const PLAYER_HEIGHT = 80;
   const playerOffset = currentTrack ? PLAYER_HEIGHT : 0;
 
   useEffect(() => {
@@ -78,7 +83,7 @@ export default function HomeScreen() {
         console.log('🎵 HAY HISTORIAL - IDs para recomendaciones:', recentIds);
         
         if (lastPlayed) {
-          setLastPlayedInfo(`Basado en: ${lastPlayed.track.title} ${lastPlayed.track.artist ? `- ${lastPlayed.track.artist}` : ''}`);
+          setLastPlayedInfo(`Basado en tu historial · ${lastPlayed.track.title} ${lastPlayed.track.artist ? `· ${lastPlayed.track.artist}` : ''}`);
         }
         
         // 2. Obtener recomendaciones basadas en el historial
@@ -102,7 +107,7 @@ export default function HomeScreen() {
       } else {
         // No hay historial, mostrar recomendaciones por defecto
         console.log('🎵 NO HAY HISTORIAL - mostrando recomendaciones generales');
-        setLastPlayedInfo('Recomendaciones para ti');
+        setLastPlayedInfo('Descubre música nueva');
         tracks = await MonochromeAPI.getRecommendations(424698825);
         console.log('🎵 Recomendaciones generales:', tracks.length);
       }
@@ -126,7 +131,7 @@ export default function HomeScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [offlineMode]); // Dependencia: offlineMode
+  }, [offlineMode]);
 
   // Efecto para cargar recomendaciones al montar y cuando cambia offlineMode
   useEffect(() => {
@@ -161,7 +166,10 @@ export default function HomeScreen() {
       if (offlineMode) {
         const isDownloaded = downloadedTracks.some(t => t.id === track.id);
         if (!isDownloaded) {
-          Alert.alert('Modo Offline', 'Esta canción no está disponible sin conexión');
+          Alert.alert(
+            '📱 Modo Offline',
+            'Esta canción no está disponible sin conexión. Descarga canciones para escucharlas offline.'
+          );
           return;
         }
       }
@@ -185,8 +193,13 @@ export default function HomeScreen() {
   if (loading) {
     return (
       <ScreenWrapper>
+        <LinearGradient
+          colors={['#0A0A0A', '#1A1A1A']}
+          style={StyleSheet.absoluteFill}
+        />
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color="#1DB954" />
+          <Text style={styles.loadingText}>Cargando tu música...</Text>
         </View>
       </ScreenWrapper>
     );
@@ -194,32 +207,14 @@ export default function HomeScreen() {
 
   return (
     <ScreenWrapper>
-      <View style={styles.header}>
-        <Text style={styles.greeting}>Bienvenido</Text>
-        <Text style={styles.title}>MetMusic</Text>
-        {offlineMode && (
-          <View style={styles.offlineBadge}>
-            <Text style={styles.offlineBadgeText}>📶 Modo offline</Text>
-          </View>
-        )}
-      </View>
-
-      {lastPlayedInfo && !offlineMode && (
-        <View style={styles.infoContainer}>
-          <Text style={styles.infoText}>{lastPlayedInfo}</Text>
-        </View>
-      )}
-
-      {offlineMode && filteredRecommendations.length === 0 && (
-        <View style={styles.offlineMessage}>
-          <Text style={styles.offlineMessageText}>
-            No hay recomendaciones disponibles sin conexión
-          </Text>
-          <Text style={styles.offlineMessageSubtext}>
-            Descarga canciones para verlas aquí
-          </Text>
-        </View>
-      )}
+      <LinearGradient
+        colors={['#0A0A0A', '#1A1A1A', '#0F0F0F']}
+        style={StyleSheet.absoluteFill}
+      />
+      
+      {/* Elementos decorativos */}
+      <View style={styles.decorativeCircle1} />
+      <View style={styles.decorativeCircle2} />
 
       <FlatList
         data={filteredRecommendations}
@@ -239,13 +234,102 @@ export default function HomeScreen() {
             refreshing={refreshing}
             onRefresh={handleRefresh}
             tintColor="#1DB954"
+            colors={['#1DB954']}
+            progressBackgroundColor="#1A1A1A"
           />
         }
         ListHeaderComponent={
-          filteredRecommendations.length > 0 ? (
-            <Text style={styles.sectionTitle}>
-              {offlineMode ? 'Tus descargas' : 'Recomendado para ti'}
-            </Text>
+          <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
+            <LinearGradient
+              colors={['rgba(29,185,84,0.2)', 'rgba(29,185,84,0.1)']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.heroGradient}
+            >
+              <View style={styles.hero}>
+                <Text style={styles.greeting}>Bienvenido a</Text>
+                <Text style={styles.title}>MetMusic</Text>
+                
+                {offlineMode && (
+                  <BlurView intensity={40} tint="dark" style={styles.offlineBadge}>
+                    <Ionicons name="cloud-outline" size={14} color="#1DB954" />
+                    <Text style={styles.offlineBadgeText}>Modo offline activado</Text>
+                  </BlurView>
+                )}
+              </View>
+            </LinearGradient>
+
+            {lastPlayedInfo && !offlineMode && (
+              <BlurView intensity={40} tint="dark" style={styles.infoContainer}>
+                <Ionicons name="time-outline" size={16} color="#1DB954" />
+                <Text style={styles.infoText}>{lastPlayedInfo}</Text>
+              </BlurView>
+            )}
+
+            {filteredRecommendations.length > 0 && (
+              <View style={styles.sectionHeader}>
+                <LinearGradient
+                  colors={['#1DB954', '#1a7a3a']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.sectionGradient}
+                />
+                <Text style={styles.sectionTitle}>
+                  {offlineMode ? '📱 Tus descargas' : '🎵 Recomendado para ti'}
+                </Text>
+              </View>
+            )}
+          </View>
+        }
+        ListEmptyComponent={
+          offlineMode && filteredRecommendations.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <BlurView intensity={30} tint="dark" style={styles.emptyCard}>
+                <LinearGradient
+                  colors={['rgba(29,185,84,0.2)', 'rgba(29,185,84,0.05)']}
+                  style={styles.emptyGradient}
+                >
+                  <Ionicons name="cloud-offline-outline" size={70} color="rgba(255,255,255,0.2)" />
+                  <Text style={styles.emptyTitle}>Modo offline</Text>
+                  <Text style={styles.emptyText}>
+                    No hay recomendaciones disponibles sin conexión
+                  </Text>
+                  <View style={styles.emptyDivider} />
+                  <Text style={styles.emptyHint}>
+                    💡 Para escuchar música sin internet:
+                  </Text>
+                  <View style={styles.stepsContainer}>
+                    <View style={styles.step}>
+                      <View style={styles.stepNumber}>
+                        <Text style={styles.stepNumberText}>1</Text>
+                      </View>
+                      <Text style={styles.stepText}>
+                        Ve a <Text style={styles.stepHighlight}>Biblioteca</Text>
+                      </Text>
+                    </View>
+                    <View style={styles.step}>
+                      <View style={styles.stepNumber}>
+                        <Text style={styles.stepNumberText}>2</Text>
+                      </View>
+                      <Text style={styles.stepText}>
+                        Elige una <Text style={styles.stepHighlight}>playlist</Text>
+                      </Text>
+                    </View>
+                    <View style={styles.step}>
+                      <View style={styles.stepNumber}>
+                        <Text style={styles.stepNumberText}>3</Text>
+                      </View>
+                      <Text style={styles.stepText}>
+                        Toca <Ionicons name="cloud-download-outline" size={14} color="#1DB954" /> para descargar
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={styles.emptyNote}>
+                    Las canciones descargadas aparecerán aquí
+                  </Text>
+                </LinearGradient>
+              </BlurView>
+            </View>
           ) : null
         }
         showsVerticalScrollIndicator={false}
@@ -261,73 +345,200 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  decorativeCircle1: {
+    position: 'absolute',
+    width: 250,
+    height: 250,
+    borderRadius: 125,
+    backgroundColor: 'rgba(29,185,84,0.05)',
+    top: -80,
+    right: -80,
+  },
+  decorativeCircle2: {
+    position: 'absolute',
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: 'rgba(29,185,84,0.03)',
+    bottom: -60,
+    left: -60,
+  },
   header: {
-    paddingTop: 40,
-    paddingBottom: 10,
-    paddingHorizontal: 20,
+    paddingBottom: 20,
+  },
+  heroGradient: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 30,
+    overflow: 'hidden',
+  },
+  hero: {
+    padding: 30,
+    alignItems: 'center',
   },
   greeting: {
-    color: '#B3B3B3',
+    color: 'rgba(255,255,255,0.5)',
     fontSize: 14,
-    marginBottom: 4,
+    fontWeight: '500',
+    letterSpacing: 1,
+    marginBottom: 8,
   },
   title: {
-    color: '#FFFFFF',
-    fontSize: 32,
-    fontWeight: 'bold',
-    marginBottom: 8,
+    fontSize: 36,
+    fontWeight: '800',
+    color: '#FFF',
+    marginBottom: 12,
+    textShadowColor: 'rgba(29,185,84,0.3)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 10,
   },
   offlineBadge: {
-    backgroundColor: 'rgba(29,185,84,0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 15,
-    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 30,
+    gap: 8,
+    backgroundColor: 'rgba(29,185,84,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(29,185,84,0.3)',
   },
   offlineBadgeText: {
-    color: '#1DB954',
-    fontSize: 12,
-    fontWeight: '600',
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '500',
   },
   infoContainer: {
-    paddingHorizontal: 20,
-    paddingBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginBottom: 20,
+    padding: 12,
+    borderRadius: 25,
+    gap: 8,
+    backgroundColor: 'rgba(29,185,84,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(29,185,84,0.2)',
   },
   infoText: {
-    color: '#1DB954',
-    fontSize: 14,
-    fontStyle: 'italic',
-  },
-  offlineMessage: {
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 40,
-  },
-  offlineMessageText: {
+    flex: 1,
     color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 8,
-    textAlign: 'center',
+    fontSize: 13,
+    fontWeight: '400',
   },
-  offlineMessageSubtext: {
-    color: '#B3B3B3',
-    fontSize: 14,
-    textAlign: 'center',
+  sectionHeader: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    position: 'relative',
+  },
+  sectionGradient: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 4,
+    borderRadius: 2,
   },
   sectionTitle: {
-    color: '#FFFFFF',
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: 'bold',
+    color: '#FFF',
     marginLeft: 16,
-    marginBottom: 16,
+  },
+  listContent: {
+    paddingHorizontal: 16,
   },
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  listContent: {
-    paddingHorizontal: 16,
+  loadingText: {
+    color: '#1DB954',
+    fontSize: 14,
+    marginTop: 12,
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+  },
+  emptyCard: {
+    width: width * 0.9,
+    borderRadius: 30,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  emptyGradient: {
+    alignItems: 'center',
+    padding: 30,
+  },
+  emptyTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#FFF',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.6)',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  emptyDivider: {
+    width: '50%',
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    marginVertical: 16,
+  },
+  emptyHint: {
+    fontSize: 14,
+    color: '#1DB954',
+    fontWeight: '500',
+    marginBottom: 12,
+  },
+  stepsContainer: {
+    width: '100%',
+    marginBottom: 12,
+  },
+  step: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  stepNumber: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(29,185,84,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(29,185,84,0.3)',
+  },
+  stepNumberText: {
+    color: '#1DB954',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  stepText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#FFF',
+  },
+  stepHighlight: {
+    color: '#1DB954',
+    fontWeight: '600',
+  },
+  emptyNote: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.3)',
+    textAlign: 'center',
+    marginTop: 8,
   },
 });

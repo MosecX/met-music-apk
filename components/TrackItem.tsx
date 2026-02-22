@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { memo, useEffect, useState } from 'react';
 import {
@@ -21,7 +22,7 @@ interface Props {
   onPress?: (track: Track) => void;
   onDownload?: (trackId: number) => Promise<void>;
   onAddToPlaylist?: (track: Track) => void;
-  onToggleFavorite?: (track: Track) => Promise<boolean>; // ✅ Devuelve boolean
+  onToggleFavorite?: (track: Track) => Promise<boolean>;
   formatDuration?: (seconds: number) => string;
   showDownload?: boolean;
   showFavorite?: boolean;
@@ -74,7 +75,7 @@ const TrackItem = memo(({
     
     if (isDownloaded) {
       Alert.alert(
-        'Eliminar descarga',
+        '🗑️ Eliminar descarga',
         `¿Eliminar "${track.title}" del almacenamiento local?`,
         [
           { text: 'Cancelar', style: 'cancel' },
@@ -106,7 +107,7 @@ const TrackItem = memo(({
     
     try {
       const newFavoriteState = await onToggleFavorite(track);
-      setIsFavorite(newFavoriteState); // ✅ Ahora newFavoriteState es boolean
+      setIsFavorite(newFavoriteState);
     } catch (error) {
       console.log('Error toggling favorite:', error);
     }
@@ -115,15 +116,15 @@ const TrackItem = memo(({
   const getQualityBadge = () => {
     if (!track?.quality) return null;
     
-    let badgeColor = '#1DB954';
+    let badgeColor = '#bad21bff';
     let badgeText = 'HIGH';
     
     if (track.quality.includes('HI_RES')) {
-      badgeColor = '#EC4899';
-      badgeText = 'Hi-Res';
+      badgeColor = '#1DB954';
+      badgeText = 'HI-RES';
     } else if (track.quality.includes('LOSSLESS')) {
       badgeColor = '#A855F7';
-      badgeText = 'Lossless';
+      badgeText = 'LOSSLESS';
     }
     
     return { badgeColor, badgeText };
@@ -142,7 +143,7 @@ const TrackItem = memo(({
     >
       {isActive && (
         <LinearGradient
-          colors={['rgba(236,72,153,0.2)', 'transparent']}
+          colors={['rgba(29,185,84,0.15)', 'transparent']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
           style={styles.activeGradient}
@@ -157,19 +158,28 @@ const TrackItem = memo(({
             onError={() => setImageError(true)}
           />
         ) : (
-          <View style={[styles.cover, styles.placeholder]}>
+          <LinearGradient
+            colors={['#2A2A2A', '#1A1A1A']}
+            style={[styles.cover, styles.placeholder]}
+          >
             <Ionicons name="musical-note" size={24} color="#666" />
-          </View>
+          </LinearGradient>
+        )}
+        
+        {isActive && (
+          <BlurView intensity={40} tint="dark" style={styles.playingIndicator}>
+            <Ionicons name="volume-high" size={12} color="#FFF" />
+          </BlurView>
         )}
       </View>
       
       <View style={styles.info}>
-        <Text style={styles.title} numberOfLines={1}>
+        <Text style={[styles.title, isActive && styles.activeTitle]} numberOfLines={1}>
           {track.title}
         </Text>
         
         <View style={styles.artistRow}>
-          <Text style={styles.artist} numberOfLines={1}>
+          <Text style={[styles.artist, isActive && styles.activeArtist]} numberOfLines={1}>
             {track.artist}
           </Text>
           <Text style={styles.duration}>
@@ -178,7 +188,7 @@ const TrackItem = memo(({
         </View>
 
         {qualityBadge && (
-          <View style={[styles.qualityBadge, { backgroundColor: qualityBadge.badgeColor + '20' }]}>
+          <View style={[styles.qualityBadge, { backgroundColor: qualityBadge.badgeColor + '15' }]}>
             <Text style={[styles.qualityText, { color: qualityBadge.badgeColor }]}>
               {qualityBadge.badgeText}
             </Text>
@@ -194,10 +204,14 @@ const TrackItem = memo(({
           ]} 
           onPress={handlePress}
         >
+          <LinearGradient
+            colors={isActive ? ['#1DB954', '#1a7a3a'] : ['transparent', 'transparent']}
+            style={styles.iconGradient}
+          />
           <Ionicons 
             name={isActive ? 'pause' : 'play'} 
-            size={22} 
-            color={isActive ? '#EC4899' : '#FFF'} 
+            size={20} 
+            color={isActive ? '#FFF' : '#FFF'} 
           />
         </TouchableOpacity>
 
@@ -208,7 +222,7 @@ const TrackItem = memo(({
           >
             <Ionicons 
               name={isFavorite ? 'heart' : 'heart-outline'} 
-              size={22} 
+              size={20} 
               color={isFavorite ? '#FF69B4' : '#FFF'} 
             />
           </TouchableOpacity>
@@ -219,7 +233,7 @@ const TrackItem = memo(({
             style={styles.iconButton}
             onPress={() => onAddToPlaylist(track)}
           >
-            <Ionicons name="add-circle-outline" size={22} color="#FFF" />
+            <Ionicons name="add-circle-outline" size={20} color="#FFF" />
           </TouchableOpacity>
         )}
 
@@ -234,7 +248,7 @@ const TrackItem = memo(({
             ) : (
               <Ionicons 
                 name={isDownloaded ? 'cloud-done' : 'cloud-download-outline'} 
-                size={22} 
+                size={20} 
                 color={isDownloaded ? '#1DB954' : '#FFF'} 
               />
             )}
@@ -250,21 +264,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: 12,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    marginHorizontal: 16,
+    backgroundColor: '#1E1E1E',
+    marginHorizontal: 0,
     marginVertical: 4,
-    borderRadius: 12,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.05)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
   activeContainer: {
-    backgroundColor: 'rgba(236,72,153,0.15)',
-    borderColor: '#EC4899',
-    transform: [{ scale: 1.02 }],
-    shadowColor: '#EC4899',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 5,
+    borderColor: '#1DB954',
+    backgroundColor: 'rgba(29,185,84,0.1)',
+    shadowColor: '#1DB954',
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
     elevation: 5,
   },
   activeGradient: {
@@ -273,28 +290,42 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    borderRadius: 12,
+    borderRadius: 16,
   },
   coverContainer: {
     width: 50,
     height: 50,
-    borderRadius: 8,
+    borderRadius: 12,
     overflow: 'hidden',
     marginRight: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
-    shadowRadius: 3,
-    elevation: 3,
+    shadowRadius: 4,
+    elevation: 4,
+    position: 'relative',
   },
   cover: {
     width: '100%',
     height: '100%',
   },
   placeholder: {
-    backgroundColor: '#2A2A2A',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  playingIndicator: {
+    position: 'absolute',
+    bottom: 2,
+    right: 2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(29,185,84,0.8)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+    overflow: 'hidden',
   },
   info: {
     flex: 1,
@@ -302,9 +333,12 @@ const styles = StyleSheet.create({
   },
   title: {
     color: '#FFF',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
-    marginBottom: 4,
+    marginBottom: 2,
+  },
+  activeTitle: {
+    color: '#1DB954',
   },
   artistRow: {
     flexDirection: 'row',
@@ -313,40 +347,57 @@ const styles = StyleSheet.create({
   },
   artist: {
     color: '#B3B3B3',
-    fontSize: 14,
+    fontSize: 13,
     flex: 1,
+  },
+  activeArtist: {
+    color: 'rgba(29,185,84,0.7)',
   },
   duration: {
     color: '#666',
-    fontSize: 12,
+    fontSize: 11,
     marginLeft: 8,
+    fontWeight: '500',
   },
   qualityBadge: {
     alignSelf: 'flex-start',
     paddingHorizontal: 8,
     paddingVertical: 2,
-    borderRadius: 12,
+    borderRadius: 10,
     marginTop: 2,
   },
   qualityText: {
-    fontSize: 10,
-    fontWeight: '600',
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   actions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   iconButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.08)',
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.03)',
+    overflow: 'hidden',
+    position: 'relative',
   },
   activeIconButton: {
-    backgroundColor: 'rgba(236,72,153,0.2)',
+    backgroundColor: 'transparent',
+    borderColor: 'rgba(29,185,84,0.3)',
+  },
+  iconGradient: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
 });
 

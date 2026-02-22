@@ -389,7 +389,7 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
-  // Siguiente canción
+  // Siguiente canción - CORREGIDO
   const playNext = async () => {
     if (!player) return;
 
@@ -401,10 +401,14 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     }
 
     if (hasNext) {
-      // Hay siguiente en la cola
+      // ✅ GUARDAR EN HISTORIAL antes de reproducir la siguiente
+      const nextTrack = queue[currentIndex + 1];
+      await PlayHistoryService.addToHistory(nextTrack, nextTrack.source, nextTrack.playlistId);
       await playTrackAtIndex(currentIndex + 1);
     } else if (repeatMode === 'all' && queue.length > 0) {
-      // Modo repeat all: volver al principio
+      // ✅ GUARDAR EN HISTORIAL al volver al principio
+      const firstTrack = queue[0];
+      await PlayHistoryService.addToHistory(firstTrack, firstTrack.source, firstTrack.playlistId);
       await playTrackAtIndex(0);
     } else {
       // No hay más canciones
@@ -412,7 +416,7 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
-  // Anterior canción
+  // Anterior canción - CORREGIDO
   const playPrevious = async () => {
     if (!player) return;
 
@@ -421,10 +425,14 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
       player.seekTo(0);
       player.play();
     } else if (hasPrev) {
-      // Ir a la anterior
+      // ✅ GUARDAR EN HISTORIAL antes de reproducir la anterior
+      const prevTrack = queue[currentIndex - 1];
+      await PlayHistoryService.addToHistory(prevTrack, prevTrack.source, prevTrack.playlistId);
       await playTrackAtIndex(currentIndex - 1);
     } else if (repeatMode === 'all') {
-      // Modo repeat all: ir a la última
+      // ✅ GUARDAR EN HISTORIAL al ir a la última
+      const lastTrack = queue[queue.length - 1];
+      await PlayHistoryService.addToHistory(lastTrack, lastTrack.source, lastTrack.playlistId);
       await playTrackAtIndex(queue.length - 1);
     }
   };

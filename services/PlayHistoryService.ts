@@ -73,27 +73,18 @@ class PlayHistoryService {
   }
 
   // Obtener IDs de las últimas N canciones (sin duplicados consecutivos)
-  async getRecentTrackIds(limit: number = 5): Promise<number[]> {
-    const history = await this.getHistory();
-    console.log('🔍 getRecentTrackIds - Historial completo:', history.map(h => h.track.title));
-    
-    // Filtramos para tener IDs únicos en orden reciente
-    const uniqueIds: number[] = [];
-    const seen = new Set<number>();
-    
-    for (const item of history) {
-      if (!seen.has(item.track.id)) {
-        seen.add(item.track.id);
-        uniqueIds.push(item.track.id);
-        console.log('🔍 ID único encontrado:', item.track.id, item.track.title);
-        
-        if (uniqueIds.length >= limit) break;
-      }
-    }
-    
-    console.log('🔍 IDs únicos finales:', uniqueIds);
-    return uniqueIds;
-  }
+  // Obtener IDs de las últimas N canciones (SIN filtrar duplicados, respetando orden)
+async getRecentTrackIds(limit: number = 5): Promise<number[]> {
+  const history = await this.getHistory();
+  
+  // SIMPLEMENTE tomar los primeros N IDs en orden (ya vienen ordenados por fecha)
+  const ids = history.slice(0, limit).map(item => item.track.id);
+  
+  console.log('🔍 Recent track IDs (ordenados):', ids);
+  console.log('🔍 Recent tracks:', history.slice(0, limit).map(h => h.track.title));
+  
+  return ids;
+}
 
   // Obtener canciones similares basadas en historial (versión simplificada)
   async getSimilarFromHistory(): Promise<StoredTrack[]> {

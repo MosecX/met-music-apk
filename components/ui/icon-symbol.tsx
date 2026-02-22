@@ -1,54 +1,114 @@
-// components/ui/icon-symbol.tsx
-import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { SymbolViewProps, SymbolWeight } from 'expo-symbols';
-import { ComponentProps } from 'react';
+// components/ui/icon-symbol.tsx - VERSIÓN SIMPLIFICADA
+import { Ionicons } from '@expo/vector-icons';
+import React from 'react';
 import { Platform, Text, type StyleProp, type TextStyle } from 'react-native';
 
-type IconMapping = Record<SymbolViewProps['name'], ComponentProps<typeof MaterialIcons>['name']>;
-type IconSymbolName = keyof typeof MAPPING;
+// Solo definimos los nombres que realmente usamos
+export type IconSymbolName = 
+  | 'house.fill'
+  | 'paperplane.fill'
+  | 'chevron.right'
+  | 'play.fill'
+  | 'pause.fill'
+  | 'play.skip.forward.fill'
+  | 'play.skip.backward.fill'
+  | 'shuffle'
+  | 'repeat'
+  | 'heart.fill'
+  | 'heart'
+  | 'xmark'
+  | 'chevron.down'
+  | 'chevron.up'
+  | 'music.note'
+  | 'list.bullet'
+  | 'plus.circle.fill'
+  | 'cloud.download.fill'
+  | 'checkmark.circle.fill'
+  | 'cloud.slash.fill'
+  | 'arrow.backward'
+  | 'magnifyingglass'
+  | 'ellipsis'
+  | 'clock'
+  | 'trash.fill'
+  | 'music.note.list'
+  | 'person.fill'
+  | 'gear'
+  | 'volume.up.fill'
+  | 'volume.down.fill'
+  | 'volume.off.fill';
 
-/**
- * Add your SF Symbols to Material Icons mappings here.
- */
-const MAPPING = {
+// Mapeo directo a nombres de Ionicons (corregidos)
+const IONICON_MAPPING: Record<IconSymbolName, any> = {
   'house.fill': 'home',
-  'paperplane.fill': 'send',
-  'chevron.left.forwardslash.chevron.right': 'code',
-  'chevron.right': 'chevron-right',
-  'play.fill': 'play-arrow',
+  'paperplane.fill': 'paper-plane',
+  'chevron.right': 'chevron-forward',
+  'play.fill': 'play',
   'pause.fill': 'pause',
-  'play.skip.forward.fill': 'skip-next',
-  'play.skip.backward.fill': 'skip-previous',
+  'play.skip.forward.fill': 'play-skip-forward',
+  'play.skip.backward.fill': 'play-skip-back',
   'shuffle': 'shuffle',
   'repeat': 'repeat',
-  'heart.fill': 'favorite',
-  'heart': 'favorite-border',
+  'heart.fill': 'heart',
+  'heart': 'heart-outline',
   'xmark': 'close',
-  'chevron.down': 'expand-more',
-  'chevron.up': 'expand-less',
-  'music.note': 'music-note',
+  'chevron.down': 'chevron-down',
+  'chevron.up': 'chevron-up',
+  'music.note': 'musical-notes',
   'list.bullet': 'list',
   'plus.circle.fill': 'add-circle',
   'cloud.download.fill': 'cloud-download',
-  'checkmark.circle.fill': 'check-circle',
-  'cloud.slash.fill': 'cloud-off',
+  'checkmark.circle.fill': 'checkmark-circle',
+  'cloud.slash.fill': 'cloud-offline',
   'arrow.backward': 'arrow-back',
   'magnifyingglass': 'search',
-  'ellipsis': 'more-vert',
-  'clock': 'access-time',
-  'trash.fill': 'delete',
-  'trash': 'delete-outline',
-  'music.note.list': 'queue-music',
+  'ellipsis': 'ellipsis-horizontal',
+  'clock': 'time',
+  'trash.fill': 'trash',
+  'music.note.list': 'musical-notes',
   'person.fill': 'person',
   'gear': 'settings',
-  'volume.up.fill': 'volume-up',
-  'volume.down.fill': 'volume-down',
-  'volume.off.fill': 'volume-off',
-} as IconMapping;
+  'volume.up.fill': 'volume-high',
+  'volume.down.fill': 'volume-low',
+  'volume.off.fill': 'volume-mute',
+};
+
+// Mapa de emojis para web
+const EMOJI_MAPPING: Record<IconSymbolName, string> = {
+  'house.fill': '🏠',
+  'paperplane.fill': '✈️',
+  'chevron.right': '▶️',
+  'play.fill': '▶️',
+  'pause.fill': '⏸️',
+  'play.skip.forward.fill': '⏩',
+  'play.skip.backward.fill': '⏪',
+  'shuffle': '🔀',
+  'repeat': '🔁',
+  'heart.fill': '❤️',
+  'heart': '🤍',
+  'xmark': '✖️',
+  'chevron.down': '⬇️',
+  'chevron.up': '⬆️',
+  'music.note': '🎵',
+  'list.bullet': '📋',
+  'plus.circle.fill': '➕',
+  'cloud.download.fill': '⬇️',
+  'checkmark.circle.fill': '✅',
+  'cloud.slash.fill': '📴',
+  'arrow.backward': '⬅️',
+  'magnifyingglass': '🔍',
+  'ellipsis': '⋯',
+  'clock': '⏱️',
+  'trash.fill': '🗑️',
+  'music.note.list': '🎶',
+  'person.fill': '👤',
+  'gear': '⚙️',
+  'volume.up.fill': '🔊',
+  'volume.down.fill': '🔉',
+  'volume.off.fill': '🔇',
+};
 
 /**
- * An icon component that uses native SF Symbols on iOS, and Material Icons on Android and web.
- * This version includes an emoji fallback for web when icons don't load.
+ * Componente de iconos que usa MaterialIcons en Android y fallback a emojis en web
  */
 export function IconSymbol({
   name,
@@ -60,59 +120,23 @@ export function IconSymbol({
   size?: number;
   color: string;
   style?: StyleProp<TextStyle>;
-  weight?: SymbolWeight;
 }) {
-  // En web, intentar con MaterialIcons primero, si falla usar emojis
+  // En web, usar emojis para evitar problemas de fuentes
   if (Platform.OS === 'web') {
-    // Mapeo de nombres a emojis como fallback
-    const emojiFallback: Record<string, string> = {
-      'home': '🏠',
-      'send': '✈️',
-      'code': '⚙️',
-      'chevron-right': '▶️',
-      'play-arrow': '▶️',
-      'pause': '⏸️',
-      'skip-next': '⏩',
-      'skip-previous': '⏪',
-      'shuffle': '🔀',
-      'repeat': '🔁',
-      'favorite': '❤️',
-      'favorite-border': '🤍',
-      'close': '✖️',
-      'expand-more': '⬇️',
-      'expand-less': '⬆️',
-      'music-note': '🎵',
-      'list': '📋',
-      'add-circle': '➕',
-      'cloud-download': '⬇️',
-      'check-circle': '✅',
-      'cloud-off': '📴',
-      'arrow-back': '⬅️',
-      'search': '🔍',
-      'more-vert': '⋮',
-      'access-time': '⏱️',
-      'delete': '🗑️',
-      'delete-outline': '🗑️',
-      'queue-music': '🎶',
-      'person': '👤',
-      'settings': '⚙️',
-      'volume-up': '🔊',
-      'volume-down': '🔉',
-      'volume-off': '🔇',
-    };
-
-    const materialName = MAPPING[name];
-    const fallbackEmoji = emojiFallback[materialName] || '•';
-
-    // Intentar con MaterialIcons, pero capturar error silenciosamente
-    try {
-      return <MaterialIcons color={color} size={size} name={materialName} style={style} />;
-    } catch {
-      // Si falla, usar emoji
-      return <Text style={[{ fontSize: size, color, textAlign: 'center' }, style]}>{fallbackEmoji}</Text>;
-    }
+    return (
+      <Text style={[{ fontSize: size, color, textAlign: 'center' }, style]}>
+        {EMOJI_MAPPING[name] || '•'}
+      </Text>
+    );
   }
 
-  // En iOS/Android, usar MaterialIcons normalmente
-  return <MaterialIcons color={color} size={size} name={MAPPING[name]} style={style} />;
+  // En Android, usar Ionicons
+  return (
+    <Ionicons
+      name={IONICON_MAPPING[name]}
+      size={size}
+      color={color}
+      style={style}
+    />
+  );
 }
