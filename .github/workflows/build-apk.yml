@@ -39,7 +39,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # 6. ✅ CORREGIDO: expo doctor correcto
+      # 6. Expo doctor (no falla el build si hay warnings)
       - name: Run expo doctor
         run: npx expo-doctor || true
 
@@ -62,25 +62,32 @@ jobs:
       - name: Make gradlew executable
         run: cd android && chmod +x gradlew
 
-      # 10. ⚠️ OPCIONAL: clean (comentado porque no es necesario siempre)
-      - name: Clean previous build
-        run: cd android && ./gradlew clean
-
-      # 11. Build RELEASE APK
+      # 10. Build RELEASE APK
       - name: Build release APK
         run: |
           cd android
           ./gradlew assembleRelease --stacktrace
 
-      # 12. Subir APK
+      # 11. 🔍 Buscar el APK generado
+      - name: Find APK
+        id: find_apk
+        run: |
+          APK_PATH=$(find android/app/build/outputs -name "*.apk" | head -n 1)
+          echo "📍 APK encontrado en: $APK_PATH"
+          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
+          echo "📦 Tamaño del APK:"
+          ls -lh $APK_PATH
+
+      # 12. ✅ Subir APK (con el nombre correcto)
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: MetMusic-APK-${{ github.sha }}
-          path: android/app/build/outputs/apk/release/app-release-unsigned.apk
+          path: ${{ steps.find_apk.outputs.apk_path }}
           retention-days: 30
 
-      # 13. Mostrar tamaño del APK
-      - name: Show APK size
+      # 13. 📊 Mostrar todos los APKs (debug)
+      - name: Show all APKs
         run: |
-          ls -lh android/app/build/outputs/apk/release/
+          echo "📁 Todos los APKs generados:"
+          find android/app/build/outputs -name "*.apk" | xargs ls -lh
