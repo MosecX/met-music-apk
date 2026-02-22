@@ -1,10 +1,15 @@
+// app/(tabs)/settings.tsx - Versión corregida
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
 import { BlurView } from 'expo-blur';
+import Constants from 'expo-constants';
+import * as FileSystem from 'expo-file-system';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
+  AppState,
   Dimensions,
   FlatList,
   RefreshControl,
@@ -35,13 +40,77 @@ export default function SettingsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const { isOffline: isNetworkOffline } = useOffline();
   const { playTrack, currentTrack } = usePlayer();
+  
+  // Estados para información dinámica
+  const [appInfo, setAppInfo] = useState({
+    version: Constants.expoConfig?.version || '1.2.0',
+    buildNumber: Constants.nativeAppVersion || '1',
+    apiProviders: 14, // Valor fijo por ahora
+    defaultQuality: 'HIGH',
+    lyricsCache: 0,
+    connectionType: 'Cargando...',
+    deviceStorage: '0 MB',
+    lastUpdated: new Date(),
+  });
 
   const playerOffset = currentTrack ? PLAYER_HEIGHT : 0;
 
+  // Función para obtener información en tiempo real
+  const loadRealTimeInfo = useCallback(async () => {
+    try {
+      // Tipo de conexión
+      const netInfo = await NetInfo.fetch();
+      const connectionType = !netInfo.isConnected ? '❌ Sin conexión' :
+                            netInfo.type === 'wifi' ? 'WiFi' : 
+                            netInfo.type === 'cellular' ? '📱 Datos móviles' : 
+                            'Conectado';
+      
+      // Espacio de almacenamiento
+      let storageInMB = '0';
+      try {
+        const storage = await FileSystem.getFreeDiskStorageAsync();
+        storageInMB = (storage / (1024 * 1024)).toFixed(0);
+      } catch (e) {
+        console.log('Error obteniendo almacenamiento');
+      }
+      
+      setAppInfo(prev => ({
+        ...prev,
+        connectionType,
+        deviceStorage: `${storageInMB} MB libres`,
+        lastUpdated: new Date(),
+      }));
+    } catch (error) {
+      console.log('Error cargando info en tiempo real:', error);
+    }
+  }, []);
+
+  // Cargar datos iniciales
   useEffect(() => {
     loadSettings();
     loadDownloads();
+    loadRealTimeInfo();
   }, []);
+
+  // Actualizar cada 5 segundos
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadRealTimeInfo();
+    }, 5000);
+    
+    return () => clearInterval(interval);
+  }, [loadRealTimeInfo]);
+
+  // Actualizar cuando la app vuelve a primer plano
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        loadRealTimeInfo();
+      }
+    });
+    
+    return () => subscription.remove();
+  }, [loadRealTimeInfo]);
 
   const loadSettings = async () => {
     try {
@@ -64,11 +133,12 @@ export default function SettingsScreen() {
     
     await Promise.all([
       loadSettings(),
-      loadDownloads()
+      loadDownloads(),
+      loadRealTimeInfo()
     ]);
     
     setRefreshing(false);
-  }, []);
+  }, [loadRealTimeInfo]);
 
   const handleTrackPress = (track: StoredTrack, index: number) => {
     if (offlineMode && !track.localUri) {
@@ -91,6 +161,13 @@ export default function SettingsScreen() {
   };
 
   const totalSize = downloadedTracks.reduce((acc, track) => acc + (track.fileSize || 0), 0);
+
+  const formatLastUpdated = (date: Date) => {
+    const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
+    if (seconds < 5) return 'ahora mismo';
+    if (seconds < 60) return `hace ${seconds} segundos`;
+    return `hace ${Math.floor(seconds / 60)} min`;
+  };
 
   // Pantalla de descargas
   if (showDownloads) {
@@ -341,28 +418,85 @@ export default function SettingsScreen() {
           )}
         </View>
 
-        {/* Sección de Información */}
+        {/* Sección de Información - EN TIEMPO REAL */}
         <View style={[styles.section, styles.lastSection]}>
           <Text style={styles.sectionTitle}>
-            <Ionicons name="information-circle-outline" size={18} color="#1DB954" /> INFORMACIÓN
+            <Ionicons name="information-circle-outline" size={18} color="#1DB954" /> INFORMACIÓN EN VIVO
           </Text>
           
           <BlurView intensity={40} tint="dark" style={styles.infoCard}>
             <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Versión</Text>
-              <Text style={styles.infoValue}>1.0.0</Text>
+              <View style={styles.infoLabelContainer}>
+                <Ionicons name="cube-outline" size={16} color="#B3B3B3" />
+                <Text style={styles.infoLabel}>Versión</Text>
+              </View>
+              <View style={styles.versionContainer}>
+                <Text style={styles.infoValue}>{appInfo.version}</Text>
+                <Text style={styles.buildNumber}>({appInfo.buildNumber})</Text>
+              </View>
             </View>
+            
             <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>API Providers</Text>
-              <Text style={styles.infoValue}>14 activos</Text>
+              <View style={styles.infoLabelContainer}>
+                <Ionicons name="cloud-outline" size={16} color="#B3B3B3" />
+                <Text style={styles.infoLabel}>API Providers</Text>
+              </View>
+              <View style={styles.infoValueContainer}>
+                <Text style={styles.infoValue}>{appInfo.apiProviders} activos</Text>
+                <View style={styles.activeDot} />
+              </View>
             </View>
+            
             <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Calidad predeterminada</Text>
-              <Text style={styles.infoValue}>HIGH</Text>
+              <View style={styles.infoLabelContainer}>
+                <Ionicons name="speedometer-outline" size={16} color="#B3B3B3" />
+                <Text style={styles.infoLabel}>Calidad</Text>
+              </View>
+              <View style={[styles.qualityBadgeInfo, { backgroundColor: '#1DB95420' }]}>
+                <Text style={[styles.qualityTextInfo, { color: '#1DB954' }]}>
+                  {appInfo.defaultQuality}
+                </Text>
+              </View>
             </View>
+            
             <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Caché de letras</Text>
-              <Text style={styles.infoValue}>24 canciones</Text>
+              <View style={styles.infoLabelContainer}>
+                <Ionicons name="musical-notes-outline" size={16} color="#B3B3B3" />
+                <Text style={styles.infoLabel}>Caché letras</Text>
+              </View>
+              <Text style={styles.infoValue}>{downloadedTracks.length} canciones</Text>
+            </View>
+            
+            <View style={styles.infoRow}>
+              <View style={styles.infoLabelContainer}>
+                <Ionicons name="wifi-outline" size={16} color="#B3B3B3" />
+                <Text style={styles.infoLabel}>Conexión</Text>
+              </View>
+              <Text style={[
+                styles.infoValue,
+                appInfo.connectionType.includes('Sin') && styles.offlineText
+              ]}>
+                {appInfo.connectionType}
+              </Text>
+            </View>
+            
+            <View style={styles.infoRow}>
+              <View style={styles.infoLabelContainer}>
+                <Ionicons name="folder-outline" size={16} color="#B3B3B3" />
+                <Text style={styles.infoLabel}>Almacenamiento</Text>
+              </View>
+              <Text style={styles.infoValue}>{appInfo.deviceStorage}</Text>
+            </View>
+            
+            {/* Última actualización */}
+            <View style={styles.updateFooter}>
+              <Ionicons name="time-outline" size={12} color="#666" />
+              <Text style={styles.updateText}>
+                Actualizado {formatLastUpdated(appInfo.lastUpdated)}
+              </Text>
+              <TouchableOpacity onPress={loadRealTimeInfo}>
+                <Ionicons name="refresh-outline" size={12} color="#1DB954" />
+              </TouchableOpacity>
             </View>
           </BlurView>
         </View>
@@ -525,7 +659,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  // Tarjeta de información
+  // Tarjeta de información - NUEVOS ESTILOS
   infoCard: {
     borderRadius: 20,
     padding: 16,
@@ -537,18 +671,69 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.05)',
   },
+  infoLabelContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   infoLabel: {
     color: '#B3B3B3',
-    fontSize: 14,
+    fontSize: 13,
   },
   infoValue: {
     color: '#FFF',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
+  },
+  infoValueContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  versionContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  buildNumber: {
+    color: '#666',
+    fontSize: 11,
+  },
+  activeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#1DB954',
+  },
+  qualityBadgeInfo: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  qualityTextInfo: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  offlineText: {
+    color: '#FF4444',
+  },
+  updateFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.05)',
+  },
+  updateText: {
+    color: '#666',
+    fontSize: 10,
   },
   // Pantalla de descargas
   downloadsHeader: {
