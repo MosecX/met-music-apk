@@ -30,6 +30,7 @@ export default function LibraryScreen() {
   
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
+  const [filteredTracks, setFilteredTracks] = useState<StoredTrack[]>([]);
   const [showNewPlaylistModal, setShowNewPlaylistModal] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState('');
 
@@ -41,12 +42,27 @@ export default function LibraryScreen() {
     loadData();
   }, []);
 
+  // ✅ Filtrar canciones según modo offline
+  useEffect(() => {
+    if (!selectedPlaylist) return;
+    
+    if (isOffline) {
+      // Modo offline: solo mostrar canciones descargadas
+      const downloaded = selectedPlaylist.tracks.filter(t => t.localUri !== undefined && t.localUri !== null);
+      setFilteredTracks(downloaded);
+      console.log('📱 Modo offline: mostrando', downloaded.length, 'de', selectedPlaylist.tracks.length, 'canciones');
+    } else {
+      // Modo online: mostrar todas
+      setFilteredTracks(selectedPlaylist.tracks);
+    }
+  }, [selectedPlaylist, isOffline]);
+
   const loadData = async () => {
     const loadedPlaylists = await storageService.getPlaylists();
     setPlaylists(loadedPlaylists);
   };
 
-  // ✅ NUEVA FUNCIÓN: Recargar la playlist seleccionada
+  // Recargar la playlist seleccionada
   const refreshSelectedPlaylist = async () => {
     if (!selectedPlaylist) return;
     
@@ -86,21 +102,20 @@ export default function LibraryScreen() {
     
     console.log('🎵 Reproduciendo playlist:', {
       cancion: track.title,
-      totalEnCola: selectedPlaylist.tracks.length,
+      totalEnCola: filteredTracks.length, // ✅ Usamos filteredTracks
       indice: index,
       fuente: isOffline ? 'local' : 'streaming'
     });
     
     playTrack(
       track,
-      selectedPlaylist.tracks,
+      filteredTracks, // ✅ Pasamos las canciones filtradas
       index,
       'playlist',
       selectedPlaylist.id
     );
   };
 
-  // ✅ CORREGIDO: Actualiza la playlist después de descargar
   const handleDownloadPlaylist = async (playlist: Playlist) => {
     Alert.alert(
       'Descargar playlist',
@@ -114,7 +129,7 @@ export default function LibraryScreen() {
             if (success) {
               Alert.alert('✅ Completado', 'Playlist descargada correctamente');
               
-              // ✅ ACTUALIZAR la playlist seleccionada si es la misma
+              // Actualizar la playlist seleccionada si es la misma
               if (selectedPlaylist && selectedPlaylist.id === playlist.id) {
                 await refreshSelectedPlaylist();
               }
@@ -129,7 +144,6 @@ export default function LibraryScreen() {
     );
   };
 
-  // ✅ CORREGIDO: Actualiza la playlist después de eliminar descargas
   const handleRemoveDownloads = async (playlist: Playlist) => {
     Alert.alert(
       'Eliminar descargas',
@@ -146,7 +160,7 @@ export default function LibraryScreen() {
               }
             }
             
-            // ✅ ACTUALIZAR la playlist seleccionada si es la misma
+            // Actualizar la playlist seleccionada si es la misma
             if (selectedPlaylist && selectedPlaylist.id === playlist.id) {
               await refreshSelectedPlaylist();
             }
@@ -274,6 +288,7 @@ export default function LibraryScreen() {
   if (selectedPlaylist) {
     const fullyDownloaded = isPlaylistFullyDownloaded(selectedPlaylist);
     const collageSize = width * 0.4;
+    const downloadedCount = selectedPlaylist.tracks.filter(t => t.localUri).length;
 
     return (
       <ScreenWrapper>
@@ -294,6 +309,16 @@ export default function LibraryScreen() {
             <Text style={styles.playlistHeaderCount}>
               {selectedPlaylist.tracks.length} canciones
             </Text>
+            
+            {/* ✅ Indicador de modo offline */}
+            {isOffline && (
+              <View style={styles.offlineBadgePlaylist}>
+                <Ionicons name="cloud-outline" size={12} color="#1DB954" />
+                <Text style={styles.offlineBadgePlaylistText}>
+                  {downloadedCount} de {selectedPlaylist.tracks.length} disponibles offline
+                </Text>
+              </View>
+            )}
           </View>
 
           {selectedPlaylist.id !== 'favorites' && (
@@ -359,8 +384,9 @@ export default function LibraryScreen() {
           )}
         </View>
 
+        {/* ✅ FlatList usando filteredTracks */}
         <FlatList
-          data={selectedPlaylist.tracks}
+          data={filteredTracks}
           keyExtractor={(item) => item.id.toString()}
           renderItem={({ item, index }) => (
             <TrackItem
@@ -372,17 +398,27 @@ export default function LibraryScreen() {
               showDownload={true}
               showFavorite={true}
               onDownload={async (trackId) => {
-                // ✅ Recargar la playlist después de descargar una canción individual
                 setTimeout(() => refreshSelectedPlaylist(), 1000);
               }}
             />
           )}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Ionicons name="musical-notes-outline" size={60} color="#666" />
+              <Ionicons 
+                name={isOffline ? "cloud-offline-outline" : "musical-notes-outline"} 
+                size={60} 
+                color="#666" 
+              />
               <Text style={styles.emptyText}>
-                No hay canciones en esta playlist
+                {isOffline 
+                  ? 'No hay canciones descargadas en esta playlist' 
+                  : 'No hay canciones en esta playlist'}
               </Text>
+              {isOffline && selectedPlaylist.tracks.length > 0 && (
+                <Text style={styles.emptySubtext}>
+                  {selectedPlaylist.tracks.length} canciones en total - Descárgalas para escucharlas offline
+                </Text>
+              )}
             </View>
           }
           contentContainerStyle={[
@@ -571,6 +607,30 @@ const styles = StyleSheet.create({
   playlistHeaderCount: {
     fontSize: 12,
     color: '#B3B3B3',
+  },
+  // ✅ Nuevos estilos para offline
+  offlineBadgePlaylist: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(29,185,84,0.1)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 15,
+    marginTop: 6,
+    alignSelf: 'center',
+    gap: 4,
+  },
+  offlineBadgePlaylistText: {
+    color: '#1DB954',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  emptySubtext: {
+    color: '#666',
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
+    paddingHorizontal: 20,
   },
   playlistActions: {
     marginTop: 4,

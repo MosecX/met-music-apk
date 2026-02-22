@@ -8,39 +8,94 @@ export interface LyricLine {
 export interface LyricsData {
   synced: LyricLine[];
   unsynced: string[];
-  provider: 'lrclib' | 'genius' | 'tidal' | null;
+  provider: 'lrclib' | 'tidal' | 'fallback' | null;
 }
 
 class LyricsService {
   private cache: Map<number, LyricsData> = new Map();
-  private geniusToken = 'QmS9OvsS-7ifRBKx_ochIPQU7oejIS9Eo_z5iWHmCPyhwLVQID3pYTHJmJTa6z8z';
 
-  // Obtener letras de LRCLIB.net (mejor fuente para synced lyrics)
+  // Fetch con timeout para evitar esperas infinitas
+  private async fetchWithTimeout(url: string, timeout = 20000): Promise<Response | null> {
+    try {
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), timeout);
+
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'MetMusic/1.0',
+        }
+      });
+      clearTimeout(id);
+      return response;
+    } catch (error) {
+      console.log('⏱️ Timeout/Error fetching:', url.substring(0, 50));
+      return null;
+    }
+  }
+
+  // Buscar en LRCLIB (mejor para letras sincronizadas)
   async fetchFromLRCLIB(track: any): Promise<LyricsData | null> {
     try {
       const artist = track.artist;
       const title = track.title;
-      const album = track.album;
-      const duration = track.duration;
+      
+      console.log('🔍 Buscando en LRCLIB:', `${title} - ${artist}`);
 
+      // Intentar primero con búsqueda exacta
       const params = new URLSearchParams({
         track_name: title,
         artist_name: artist,
       });
       
-      if (album) params.append('album_name', album);
-      if (duration) params.append('duration', duration.toString());
-
-      const response = await fetch(`https://lrclib.net/api/get?${params.toString()}`);
+      let response = await this.fetchWithTimeout(`https://lrclib.net/api/get?${params.toString()}`);
       
-      if (!response.ok) return null;
+      // Si falla, intentar búsqueda general
+      if (!response || !response.ok) {
+        console.log('📝 Búsqueda exacta falló, intentando búsqueda general...');
+        const searchParams = new URLSearchParams({
+          q: `${artist} ${title}`.substring(0, 100)
+        });
+        response = await this.fetchWithTimeout(`https://lrclib.net/api/search?${searchParams.toString()}`);
+        
+        if (response?.ok) {
+          const results = await response.json();
+          if (results && results.length > 0) {
+            // Tomar el primer resultado
+            const firstResult = results[0];
+            const trackParams = new URLSearchParams({
+              track_name: firstResult.trackName,
+              artist_name: firstResult.artistName,
+            });
+            response = await this.fetchWithTimeout(`https://lrclib.net/api/get?${trackParams.toString()}`);
+          }
+        }
+      }
+
+      if (!response || !response.ok) {
+        console.log('❌ LRCLIB no encontró letras');
+        return null;
+      }
 
       const data = await response.json();
 
-      if (data.syncedLyrics) {
-        const synced = this.parseSyncedLyrics(data.syncedLyrics);
-        const unsynced = data.plainLyrics ? data.plainLyrics.split('\n').filter((l: string) => l.trim()) : [];
+      // Procesar letras
+      const synced: LyricLine[] = [];
+      const unsynced: string[] = [];
 
+      if (data.syncedLyrics) {
+        console.log('✅ Letras sincronizadas encontradas');
+        const parsed = this.parseSyncedLyrics(data.syncedLyrics);
+        synced.push(...parsed);
+      }
+
+      if (data.plainLyrics) {
+        console.log('📝 Letras planas encontradas');
+        const plain = data.plainLyrics.split('\n').filter((l: string) => l.trim());
+        unsynced.push(...plain);
+      }
+
+      if (synced.length > 0 || unsynced.length > 0) {
         return {
           synced,
           unsynced,
@@ -49,20 +104,29 @@ class LyricsService {
       }
 
       return null;
-    } catch (error) {
-      console.log('❌ LRCLIB fetch failed:', error);
+    } catch (error: any) {
+      console.log('❌ Error en LRCLIB:', error?.message || 'Unknown error');
       return null;
     }
   }
 
-  // Obtener letras directamente de Tidal (si la API lo soporta)
+  // Buscar en Tidal a través de la API de Monochrome
   async fetchFromTidal(trackId: number): Promise<LyricsData | null> {
     try {
+      console.log('🔍 Buscando en Tidal...');
+      
       // Algunas instancias de la API pueden soportar /lyrics endpoint
       const response = await MonochromeAPI.fetchWithRetry(`/lyrics?id=${trackId}`);
+      
+      if (!response.ok) {
+        console.log('❌ Tidal no respondió');
+        return null;
+      }
+      
       const data = await response.json();
       
       if (data?.syncedLyrics) {
+        console.log('✅ Letras sincronizadas de Tidal');
         return {
           synced: this.parseSyncedLyrics(data.syncedLyrics),
           unsynced: data.plainLyrics?.split('\n') || [],
@@ -71,29 +135,30 @@ class LyricsService {
       }
       
       return null;
-    } catch {
+    } catch (error: any) {
+      console.log('❌ Tidal fetch failed:', error?.message || 'Unknown error');
       return null;
     }
   }
 
-  // Buscar en Genius (para anotaciones, no synced lyrics)
-  async searchGenius(title: string, artist: string) {
-    try {
-      const cleanTitle = title.split('(')[0].split('-')[0].trim();
-      const query = encodeURIComponent(`${cleanTitle} ${artist}`);
-      
-      const response = await fetch(
-        `https://api.genius.com/search?q=${query}&access_token=${this.geniusToken}`
-      );
-      
-      if (!response.ok) return null;
-      
-      const data = await response.json();
-      return data.response.hits[0]?.result || null;
-    } catch (error) {
-      console.log('Genius search failed:', error);
-      return null;
-    }
+  // Fallback informativo
+  private getFallbackLyrics(track: any): LyricsData {
+    console.log('📝 Usando fallback lyrics');
+    return {
+      synced: [],
+      unsynced: [
+        `🎵 ${track.title || 'Sin título'}`,
+        `👤 ${track.artist || 'Artista desconocido'}`,
+        `💿 ${track.album || 'Álbum desconocido'}`,
+        ``,
+        `No hay letras disponibles para esta canción.`,
+        `Puedes buscar en:`,
+        `• Google: "${track.title || ''} ${track.artist || ''} lyrics"`,
+        `• Genius: https://genius.com/search?q=${encodeURIComponent(`${track.title || ''} ${track.artist || ''}`)}`,
+        `• LRCLIB: https://lrclib.net/search?q=${encodeURIComponent(`${track.title || ''} ${track.artist || ''}`)}`
+      ],
+      provider: 'fallback'
+    };
   }
 
   // Parsear letras sincronizadas (formato LRC)
@@ -117,50 +182,39 @@ class LyricsService {
         }
         return null;
       })
-      .filter(Boolean) as LyricLine[];
+      .filter((line): line is LyricLine => line !== null);
   }
 
-  // Formatear a LRC para descargar
-  formatAsLRC(lyrics: LyricsData, track: any): string {
-    let lrc = `[ti:${track.title}]\n`;
-    lrc += `[ar:${track.artist}]\n`;
-    lrc += `[al:${track.album}]\n`;
-    lrc += `[by:${lyrics.provider}]\n`;
-    lrc += '\n';
-    
-    if (lyrics.synced.length > 0) {
-      lyrics.synced.forEach(line => {
-        const minutes = Math.floor(line.time / 60);
-        const seconds = Math.floor(line.time % 60);
-        const centiseconds = Math.floor((line.time % 1) * 100);
-        lrc += `[${minutes}:${seconds.toString().padStart(2, '0')}.${centiseconds.toString().padStart(2, '0')}] ${line.text}\n`;
-      });
-    } else {
-      lyrics.unsynced.forEach(line => {
-        lrc += `${line}\n`;
-      });
-    }
-    
-    return lrc;
-  }
-
-  // Método principal: intenta todas las fuentes
+  // Método principal
   async getLyrics(track: any): Promise<LyricsData | null> {
+    if (!track) return null;
+
     // Verificar caché
     if (this.cache.has(track.id)) {
+      console.log('📦 Usando letras en caché');
       return this.cache.get(track.id)!;
     }
 
-    // 1. Intentar LRCLIB (mejor para synced)
+    console.log('🎤 Buscando letras para:', track.title, '-', track.artist);
+
+    // 1. Intentar LRCLIB
     let lyrics = await this.fetchFromLRCLIB(track);
     
     // 2. Si no, intentar Tidal
     if (!lyrics) {
+      console.log('🔄 Intentando con Tidal...');
       lyrics = await this.fetchFromTidal(track.id);
     }
 
-    // Guardar en caché si se encontró
+    // 3. Si todo falla, usar fallback
+    if (!lyrics) {
+      console.log('🔄 Usando fallback lyrics');
+      lyrics = this.getFallbackLyrics(track);
+    }
+
+    // Guardar en caché
     if (lyrics) {
+      console.log('✅ Letras obtenidas de:', lyrics.provider);
       this.cache.set(track.id, lyrics);
     }
 
@@ -170,8 +224,8 @@ class LyricsService {
   // Limpiar caché
   clearCache() {
     this.cache.clear();
+    console.log('🗑️ Caché de letras limpiado');
   }
 }
 
-const lyricsService = new LyricsService();
-export default lyricsService;
+export default new LyricsService();

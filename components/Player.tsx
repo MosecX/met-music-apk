@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Dimensions,
   Image,
+  Linking,
   Modal,
   ScrollView,
   StyleSheet,
@@ -61,12 +62,18 @@ const Player = ({ track, onClose }: PlayerProps) => {
   const [isLoading, setIsLoading] = useState(true);
   const [lyricsVisible, setLyricsVisible] = useState(false);
   const [lyrics, setLyrics] = useState<any[]>([]);
+  const [unsyncedLyrics, setUnsyncedLyrics] = useState<string[]>([]);
   const [currentLyric, setCurrentLyric] = useState('');
   const [loadingLyrics, setLoadingLyrics] = useState(false);
+  const [lyricsProvider, setLyricsProvider] = useState<string | null>(null);
   const [showQueue, setShowQueue] = useState(false);
   const [showPlaylistModal, setShowPlaylistModal] = useState(false);
   const [lyricsContainerHeight, setLyricsContainerHeight] = useState(0);
   const [lyricsItemHeight, setLyricsItemHeight] = useState(60);
+  
+  // Estados para el slider
+  const [sliderValue, setSliderValue] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
   
   // Refs y animaciones
   const scrollViewRef = useRef<ScrollView>(null);
@@ -77,7 +84,34 @@ const Player = ({ track, onClose }: PlayerProps) => {
   const lastActiveIndex = useRef(-1);
   const TAB_BAR_HEIGHT = 60;
 
+  // Actualizar slider cuando la posición cambia (pero no mientras arrastramos)
+  useEffect(() => {
+    if (!isDragging) {
+      setSliderValue(position);
+    }
+  }, [position, isDragging]);
+
   const progress = duration > 0 ? (position / duration) * 100 : 0;
+
+  // Obtener etiqueta de calidad
+  const getQualityBadge = () => {
+    if (!track?.quality) return null;
+    
+    let badgeColor = '#1DB954';
+    let badgeText = 'HIGH';
+    
+    if (track.quality.includes('HI_RES')) {
+      badgeColor = '#EC4899';
+      badgeText = 'HI-RES';
+    } else if (track.quality.includes('LOSSLESS')) {
+      badgeColor = '#A855F7';
+      badgeText = 'LOSSLESS';
+    }
+    
+    return { badgeColor, badgeText };
+  };
+
+  const qualityBadge = getQualityBadge();
 
   // ✅ AUTO-NEXT cuando termina la canción
   useEffect(() => {
@@ -114,7 +148,7 @@ const Player = ({ track, onClose }: PlayerProps) => {
     }
   }, [isExpanded]);
 
-  // 🔥 CALCULAR ALTURA RESTANDO EL TAB BAR
+  // Altura disponible
   const availableHeight = height - TAB_BAR_HEIGHT - insets.bottom;
 
   // Estilos animados
@@ -158,16 +192,26 @@ const Player = ({ track, onClose }: PlayerProps) => {
 
   const loadLyrics = async () => {
     setLoadingLyrics(true);
-    const lyricsData = await LyricsService.getLyrics(track);
-    if (lyricsData?.synced?.length) {
-      setLyrics(lyricsData.synced);
-    } else {
-      setLyrics([]);
+    setLyrics([]);
+    setUnsyncedLyrics([]);
+    
+    try {
+      const lyricsData = await LyricsService.getLyrics(track);
+      
+      if (lyricsData) {
+        setLyrics(lyricsData.synced || []);
+        setUnsyncedLyrics(lyricsData.unsynced || []);
+        setLyricsProvider(lyricsData.provider);
+        console.log(`✅ Letras cargadas de: ${lyricsData.provider}`);
+      }
+    } catch (error) {
+      console.log('❌ Error cargando letras:', error);
+    } finally {
+      setLoadingLyrics(false);
     }
-    setLoadingLyrics(false);
   };
 
-  // FORZAR el centrado de la letra actual
+  // Sincronizar letras con la reproducción
   useEffect(() => {
     if (!lyrics.length || !lyricsVisible || !lyricsScrollRef.current || lyricsContainerHeight === 0) return;
     
@@ -320,10 +364,12 @@ const Player = ({ track, onClose }: PlayerProps) => {
           </View>
 
           <ScrollView 
+            ref={scrollViewRef}
             style={styles.expandedScroll}
             contentContainerStyle={styles.expandedContent}
             showsVerticalScrollIndicator={false}
             bounces={false}
+            scrollEnabled={!isDragging} // ✅ Deshabilitar scroll mientras se arrastra el slider
           >
             <View style={{ height: 20 }} />
             
@@ -335,21 +381,37 @@ const Player = ({ track, onClose }: PlayerProps) => {
             <View style={styles.expandedTrackInfo}>
               <Text style={styles.expandedTitle} numberOfLines={2}>{track.title}</Text>
               <Text style={styles.expandedArtist} numberOfLines={1}>{track.artist}</Text>
+              
+              {/* ✅ Etiqueta de calidad */}
+              {qualityBadge && (
+                <View style={[styles.qualityBadge, { backgroundColor: qualityBadge.badgeColor + '20' }]}>
+                  <Text style={[styles.qualityText, { color: qualityBadge.badgeColor }]}>
+                    {qualityBadge.badgeText}
+                  </Text>
+                </View>
+              )}
             </View>
 
             <View style={styles.expandedProgressContainer}>
               <Slider
                 style={styles.expandedSlider}
-                value={position}
+                value={sliderValue}
                 minimumValue={0}
                 maximumValue={duration || 1}
-                onSlidingComplete={(value) => seekTo(value / 1000)}
+                onValueChange={(value) => {
+                  setIsDragging(true);
+                  setSliderValue(value);
+                }}
+                onSlidingComplete={(value) => {
+                  seekTo(value / 1000);
+                  setIsDragging(false);
+                }}
                 minimumTrackTintColor="#1DB954"
                 maximumTrackTintColor="#333"
                 thumbTintColor="#1DB954"
               />
               <View style={styles.expandedTimeRow}>
-                <Text style={styles.expandedTime}>{formatTime(position)}</Text>
+                <Text style={styles.expandedTime}>{formatTime(isDragging ? sliderValue : position)}</Text>
                 <Text style={styles.expandedTime}>{formatTime(duration)}</Text>
               </View>
             </View>
@@ -409,7 +471,6 @@ const Player = ({ track, onClose }: PlayerProps) => {
                 </Text>
               </TouchableOpacity>
 
-              {/* Botón para agregar a playlist */}
               <TouchableOpacity 
                 style={styles.expandedActionButton}
                 onPress={() => setShowPlaylistModal(true)}
@@ -481,17 +542,64 @@ const Player = ({ track, onClose }: PlayerProps) => {
                     </View>
                   ))}
                 </ScrollView>
+              ) : unsyncedLyrics.length > 0 ? (
+                <ScrollView style={styles.lyricsScroll}>
+                  {unsyncedLyrics.map((line, index) => (
+                    <Text key={index} style={styles.unsyncedLine}>
+                      {line}
+                    </Text>
+                  ))}
+                </ScrollView>
               ) : (
                 <View style={styles.noLyrics}>
                   <Ionicons name="musical-notes-outline" size={60} color="#444" />
-                  <Text style={styles.noLyricsText}>No hay letras disponibles</Text>
+                  <Text style={styles.noLyricsTitle}>No hay letras disponibles</Text>
+                  <Text style={styles.noLyricsSubtitle}>
+                    Puedes buscar en:
+                  </Text>
+                  <TouchableOpacity 
+                    style={styles.lyricsLink}
+                    onPress={() => {
+                      const query = encodeURIComponent(`${track.title} ${track.artist} lyrics`);
+                      Linking.openURL(`https://google.com/search?q=${query}`);
+                    }}
+                  >
+                    <Ionicons name="logo-google" size={16} color="#1DB954" />
+                    <Text style={styles.lyricsLinkText}>Buscar en Google</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={styles.lyricsLink}
+                    onPress={() => {
+                      const query = encodeURIComponent(`${track.title} ${track.artist}`);
+                      Linking.openURL(`https://genius.com/search?q=${query}`);
+                    }}
+                  >
+                    <Ionicons name="musical-notes" size={16} color="#FFD700" />
+                    <Text style={styles.lyricsLinkText}>Buscar en Genius</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={styles.lyricsLink}
+                    onPress={() => {
+                      const query = encodeURIComponent(`${track.title} ${track.artist}`);
+                      Linking.openURL(`https://lrclib.net/search?q=${query}`);
+                    }}
+                  >
+                    <Ionicons name="cloud-outline" size={16} color="#1DB954" />
+                    <Text style={styles.lyricsLinkText}>Buscar en LRCLIB</Text>
+                  </TouchableOpacity>
                 </View>
+              )}
+
+              {lyricsProvider && lyricsProvider !== 'fallback' && (
+                <Text style={styles.providerText}>
+                  Letras por: {lyricsProvider.toUpperCase()}
+                </Text>
               )}
             </View>
           </View>
         </Modal>
 
-        {/* Modal de cola - CON KEYS ÚNICAS CORREGIDAS */}
+        {/* Modal de cola */}
         <Modal
           visible={showQueue && isExpanded}
           transparent
@@ -510,8 +618,7 @@ const Player = ({ track, onClose }: PlayerProps) => {
 
               <ScrollView style={styles.queueList}>
                 {queue.map((item, index) => {
-                  // Generar key ÚNICA usando queueId si existe, o combinación única
-                  const uniqueKey = item.queueId || `${item.id}-${index}-${Date.now()}`;
+                  const uniqueKey = item.queueId || `${item.id}-${index}`;
                   
                   return (
                     <TouchableOpacity 
@@ -548,7 +655,6 @@ const Player = ({ track, onClose }: PlayerProps) => {
           onClose={() => setShowPlaylistModal(false)}
           track={track}
           onAdded={() => {
-            // Opcional: mostrar notificación
             console.log('✅ Canción agregada a playlist');
           }}
         />
@@ -676,6 +782,18 @@ const styles = StyleSheet.create({
     color: '#B3B3B3',
     fontSize: 18,
     textAlign: 'center',
+    marginBottom: 8,
+  },
+  qualityBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 15,
+    alignSelf: 'center',
+    marginTop: 8,
+  },
+  qualityText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   expandedProgressContainer: {
     width: '100%',
@@ -771,11 +889,20 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginVertical: 8,
     lineHeight: 24,
+    paddingHorizontal: 20,
   },
   activeLyric: {
     color: '#1DB954',
     fontSize: 20,
     fontWeight: 'bold',
+  },
+  unsyncedLine: {
+    color: '#B3B3B3',
+    fontSize: 16,
+    textAlign: 'center',
+    marginVertical: 4,
+    lineHeight: 24,
+    paddingHorizontal: 20,
   },
   lyricsLoading: {
     flex: 1,
@@ -791,11 +918,41 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingBottom: 40,
   },
-  noLyricsText: {
-    color: '#666',
-    fontSize: 16,
+  noLyricsTitle: {
+    color: '#FFF',
+    fontSize: 18,
+    fontWeight: 'bold',
     marginTop: 16,
+    marginBottom: 8,
+  },
+  noLyricsSubtitle: {
+    color: '#666',
+    fontSize: 14,
+    marginBottom: 16,
+  },
+  lyricsLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1A1A1A',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 25,
+    marginVertical: 6,
+    width: '80%',
+    gap: 10,
+  },
+  lyricsLinkText: {
+    color: '#FFF',
+    fontSize: 16,
+    flex: 1,
+  },
+  providerText: {
+    color: '#666',
+    fontSize: 10,
+    textAlign: 'center',
+    marginTop: 10,
   },
   queueList: {
     flex: 1,
