@@ -40,16 +40,28 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
-      "expo-router",
-      [
-        "expo-audio",
-        {
-          "microphonePermission": "Permitir que MetMusic acceda al micrófono para visualización de audio.",
-          "recordAudioAndroid": true
-        }
+  "expo-router",
+  [
+    "expo-audio",
+    {
+      "microphonePermission": "Permitir que MetMusic acceda al micrófono para visualización de audio.",
+      "recordAudioAndroid": true
+    }
+  ],
+  [
+    "react-native-audio-api",
+    {
+      "iosBackgroundMode": true,
+      "androidPermissions": [
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ],
-      "expo-asset"
-    ],
+      "androidForegroundService": true,
+      "androidFSTypes": ["mediaPlayback"]
+    }
+  ],
+  "expo-asset"
+],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true

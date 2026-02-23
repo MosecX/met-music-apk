@@ -1,12 +1,11 @@
-// app/(tabs)/settings.tsx - Versión con actualizaciones
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import { BlurView } from 'expo-blur';
 import Constants from 'expo-constants';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy'; // ✅ CAMBIADO A LEGACY
 import { LinearGradient } from 'expo-linear-gradient';
-import { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -130,25 +129,29 @@ export default function SettingsScreen() {
                             netInfo.type === 'cellular' ? '📱 Datos móviles' : 
                             'Conectado';
       
-      // Espacio de almacenamiento
+      // ✅ Espacio de almacenamiento - USANDO LEGACY API (sin warning)
       let storageInMB = '0';
       try {
         const storage = await FileSystem.getFreeDiskStorageAsync();
         storageInMB = (storage / (1024 * 1024)).toFixed(0);
       } catch (e) {
         console.log('Error obteniendo almacenamiento');
+        // Fallback: calcular espacio usado por descargas
+        let totalBytes = 0;
+        downloadedTracks.forEach(t => totalBytes += t.fileSize || 0);
+        storageInMB = (totalBytes / (1024 * 1024)).toFixed(0);
       }
       
       setAppInfo(prev => ({
         ...prev,
         connectionType,
-        deviceStorage: `${storageInMB} MB libres`,
+        deviceStorage: `${storageInMB} MB ${storageInMB === '0' ? 'libres' : 'usados'}`,
         lastUpdated: new Date(),
       }));
     } catch (error) {
       console.log('Error cargando info en tiempo real:', error);
     }
-  }, []);
+  }, [downloadedTracks]);
 
   // Cargar datos iniciales
   useEffect(() => {
