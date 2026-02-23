@@ -1,4 +1,4 @@
-// app/(tabs)/settings.tsx - Versión corregida
+// app/(tabs)/settings.tsx - Versión con actualizaciones
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
@@ -6,12 +6,14 @@ import { BlurView } from 'expo-blur';
 import Constants from 'expo-constants';
 import * as FileSystem from 'expo-file-system';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   AppState,
   Dimensions,
   FlatList,
+  Linking,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -25,6 +27,7 @@ import TrackItem from '../../components/TrackItem';
 import { usePlayer } from '../../context/PlayerContext';
 import { useOffline } from '../../hooks/useOffline';
 import storageService from '../../services/storage';
+import UpdateService from '../../services/UpdateService';
 import { StoredTrack } from '../../types';
 
 const { width } = Dimensions.get('window');
@@ -45,7 +48,7 @@ export default function SettingsScreen() {
   const [appInfo, setAppInfo] = useState({
     version: Constants.expoConfig?.version || '1.2.0',
     buildNumber: Constants.nativeAppVersion || '1',
-    apiProviders: 14, // Valor fijo por ahora
+    apiProviders: 14,
     defaultQuality: 'HIGH',
     lyricsCache: 0,
     connectionType: 'Cargando...',
@@ -53,7 +56,69 @@ export default function SettingsScreen() {
     lastUpdated: new Date(),
   });
 
+  // Estados para actualizaciones
+  const [updateStatus, setUpdateStatus] = useState({
+    checking: false,
+    hasUpdate: false,
+    latestVersion: '',
+    error: null as string | null,
+  });
+
   const playerOffset = currentTrack ? PLAYER_HEIGHT : 0;
+
+  // Función para verificar actualizaciones
+  const checkForUpdates = useCallback(async (showAlertIfNoUpdate = false) => {
+    try {
+      setUpdateStatus(prev => ({ ...prev, checking: true, error: null }));
+      
+      const result = await UpdateService.checkForUpdates(true); // Forzar refresco
+      
+      setUpdateStatus({
+        checking: false,
+        hasUpdate: result.hasUpdate,
+        latestVersion: result.latestVersion || '',
+        error: result.error,
+      });
+
+      // Mostrar alerta según el resultado
+      if (result.hasUpdate) {
+        Alert.alert(
+          '🎉 ¡Actualización disponible!',
+          UpdateService.formatUpdateMessage(result),
+          [
+            { text: 'Ahora no', style: 'cancel' },
+            { 
+              text: 'Ver en GitHub', 
+              onPress: () => Linking.openURL(UpdateService.getDownloadUrl())
+            }
+          ]
+        );
+      } else if (showAlertIfNoUpdate && !result.error) {
+        Alert.alert(
+          '✅ Todo actualizado',
+          `Tienes la última versión (${result.currentVersion})`,
+          [{ text: 'OK' }]
+        );
+      } else if (result.error && showAlertIfNoUpdate) {
+        Alert.alert(
+          '❌ Error',
+          `No se pudo verificar: ${result.error}`,
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error: any) {
+      setUpdateStatus(prev => ({ 
+        ...prev, 
+        checking: false, 
+        error: error.message 
+      }));
+    }
+  }, []);
+
+  // Verificar al iniciar (solo si hay update, sin alerta)
+  useEffect(() => {
+    checkForUpdates(false);
+  }, []);
 
   // Función para obtener información en tiempo real
   const loadRealTimeInfo = useCallback(async () => {
@@ -106,11 +171,12 @@ export default function SettingsScreen() {
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         loadRealTimeInfo();
+        checkForUpdates(false); // Verificar updates silenciosamente
       }
     });
     
     return () => subscription.remove();
-  }, [loadRealTimeInfo]);
+  }, [loadRealTimeInfo, checkForUpdates]);
 
   const loadSettings = async () => {
     try {
@@ -134,11 +200,12 @@ export default function SettingsScreen() {
     await Promise.all([
       loadSettings(),
       loadDownloads(),
-      loadRealTimeInfo()
+      loadRealTimeInfo(),
+      checkForUpdates(false),
     ]);
     
     setRefreshing(false);
-  }, [loadRealTimeInfo]);
+  }, [loadRealTimeInfo, checkForUpdates]);
 
   const handleTrackPress = (track: StoredTrack, index: number) => {
     if (offlineMode && !track.localUri) {
@@ -438,6 +505,32 @@ export default function SettingsScreen() {
             
             <View style={styles.infoRow}>
               <View style={styles.infoLabelContainer}>
+                <Ionicons name="refresh-outline" size={16} color="#B3B3B3" />
+                <Text style={styles.infoLabel}>Actualizaciones</Text>
+              </View>
+              <TouchableOpacity 
+                style={[
+                  styles.updateButton,
+                  updateStatus.hasUpdate && styles.updateButtonAvailable
+                ]}
+                onPress={() => checkForUpdates(true)}
+                disabled={updateStatus.checking}
+              >
+                {updateStatus.checking ? (
+                  <ActivityIndicator size="small" color="#1DB954" />
+                ) : (
+                  <Text style={[
+                    styles.updateButtonText,
+                    updateStatus.hasUpdate && styles.updateButtonTextAvailable
+                  ]}>
+                    {updateStatus.hasUpdate ? `¡Nueva v${updateStatus.latestVersion}!` : 'Buscar'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.infoRow}>
+              <View style={styles.infoLabelContainer}>
                 <Ionicons name="cloud-outline" size={16} color="#B3B3B3" />
                 <Text style={styles.infoLabel}>API Providers</Text>
               </View>
@@ -659,7 +752,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  // Tarjeta de información - NUEVOS ESTILOS
+  // Tarjeta de información - ESTILOS ACTUALIZADOS
   infoCard: {
     borderRadius: 20,
     padding: 16,
@@ -720,6 +813,26 @@ const styles = StyleSheet.create({
   },
   offlineText: {
     color: '#FF4444',
+  },
+  // Estilos para actualizaciones
+  updateButton: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 15,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  updateButtonAvailable: {
+    backgroundColor: 'rgba(29,185,84,0.2)',
+  },
+  updateButtonText: {
+    color: '#B3B3B3',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  updateButtonTextAvailable: {
+    color: '#1DB954',
   },
   updateFooter: {
     flexDirection: 'row',

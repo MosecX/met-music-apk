@@ -2,8 +2,8 @@
   "expo": {
     "name": "MetMusic",
     "slug": "MetMusic",
-    "version": "1.2.0",
-    "orientation": "portrait",
+    "version": "1.2.1",
+    "orientation": "portraWit",
     "icon": "./assets/images/icon.png",
     "scheme": "metmusic",
     "userInterfaceStyle": "automatic",
