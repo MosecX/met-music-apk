@@ -181,3 +181,5 @@ jobs:
           echo "📱 APK firmado subido: ${{ steps.prepare_apk.outputs.apk_name }}"
           echo "🔗 Ver release en:"
           echo "https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.version }}"
+
+

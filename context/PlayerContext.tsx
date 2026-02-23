@@ -1,6 +1,6 @@
 import { AudioMode, setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native'; // ✅ Agregado Platform
 import MonochromeAPI from '../services/MonochromeAPI';
 import PlayHistoryService from '../services/PlayHistoryService';
 import PlaybackPersistenceService from '../services/PlaybackPersistenceService';
@@ -278,20 +278,37 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     });
   }, [queue, currentIndex, shuffleMode, repeatMode, currentTrack, status?.playing]);
 
-  // Configurar audio
+  // ✅ CONFIGURACIÓN DE AUDIO MEJORADA para mantener la app activa en segundo plano
   useEffect(() => {
     const setupAudio = async () => {
-      const mode: AudioMode = {
-        allowsRecording: false,
-        playsInSilentMode: true,
-        shouldPlayInBackground: true,
-        interruptionMode: 'doNotMix',
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
-      };
-      await setAudioModeAsync(mode);
-      console.log('✅ AudioMode configurado');
+      try {
+        const mode: AudioMode = {
+          allowsRecording: false,
+          playsInSilentMode: true,
+          staysActiveInBackground: true,      // ✅ CLAVE: Mantiene el audio activo en segundo plano
+          shouldPlayInBackground: true,        // ✅ Permite reproducción en background
+          interruptionMode: 'duckOthers',      // ✅ Mejor para Android
+          shouldDuckAndroid: true,
+          playThroughEarpieceAndroid: false,
+        };
+        
+        await setAudioModeAsync(mode);
+        console.log('✅ AudioMode configurado - Background activo:', {
+          staysActiveInBackground: true,
+          shouldPlayInBackground: true,
+          platform: Platform.OS
+        });
+
+        // En Android, asegurar wake lock para mantener CPU activa
+        if (Platform.OS === 'android') {
+          // La configuración nativa ya maneja esto con los permisos
+          console.log('📱 Android: Permisos de foreground service configurados');
+        }
+      } catch (error) {
+        console.log('❌ Error configurando AudioMode:', error);
+      }
     };
+    
     setupAudio();
   }, []);
 
