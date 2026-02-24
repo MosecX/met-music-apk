@@ -7,45 +7,30 @@ import PlaybackPersistenceService from '../services/PlaybackPersistenceService';
 import { QueueItem, StoredTrack } from '../types';
 
 interface PlayerContextType {
-  // Track actual
   currentTrack: QueueItem | null;
-  
-  // Cola de reproducción
   queue: QueueItem[];
   originalQueue: QueueItem[];
   currentIndex: number;
-  
-  // Estados
   isPlaying: boolean;
   position: number;
   duration: number;
   showExpanded: boolean;
   setShowExpanded: (show: boolean) => void;
-  
-  // Modos de reproducción
   shuffleMode: boolean;
   repeatMode: 'off' | 'all' | 'one';
-  
-  // Métodos principales
   playTrack: (track: StoredTrack, tracks?: StoredTrack[], index?: number, source?: string, playlistId?: string) => Promise<void>;
   playTrackAtIndex: (index: number) => Promise<void>;
   playNext: () => Promise<void>;
   playPrevious: () => Promise<void>;
   togglePlayPause: () => Promise<void>;
   seekTo: (seconds: number) => Promise<void>;
-  
-  // Gestión de cola
   addToQueue: (track: StoredTrack, position?: 'next' | 'end') => void;
   addTracksToQueue: (tracks: StoredTrack[], position?: 'next' | 'end') => void;
   removeFromQueue: (index: number) => void;
   clearQueue: () => void;
   moveInQueue: (fromIndex: number, toIndex: number) => void;
-  
-  // Modos
   toggleShuffle: () => void;
   toggleRepeat: () => void;
-  
-  // Utilidades
   hasNext: boolean;
   hasPrev: boolean;
   queueLength: number;
@@ -61,7 +46,6 @@ export const usePlayer = () => {
 };
 
 export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
-  // Estados principales
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [originalQueue, setOriginalQueue] = useState<QueueItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(-1);
@@ -72,7 +56,6 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
 
-  // Refs
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<any>(null);
   const startTimeRef = useRef(0);
@@ -80,13 +63,14 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
   const saveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const hasRestoredRef = useRef(false);
   const animationFrameRef = useRef<number | null>(null);
+  const isSeekingRef = useRef(false);
 
   const currentTrack = currentIndex >= 0 ? queue[currentIndex] : null;
   const hasNext = currentIndex < queue.length - 1;
   const hasPrev = currentIndex > 0;
   const queueLength = queue.length;
 
-  // ========== INICIALIZACIÓN ==========
+  // Inicialización
   useEffect(() => {
     audioContextRef.current = new AudioContext();
     console.log('✅ AudioContext creado');
@@ -100,7 +84,7 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, []);
 
-  // ========== NOTIFICACIÓN ==========
+  // Notificación
   useEffect(() => {
     const setupNotif = async () => {
       await PlaybackNotificationManager.enableControl('play', true);
@@ -124,7 +108,6 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     if (!currentTrack) return;
-    
     PlaybackNotificationManager.show({
       title: currentTrack.title,
       artist: currentTrack.artist,
@@ -135,48 +118,34 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     });
   }, [currentTrack, position, isPlaying, duration]);
 
-  // ========== PERSISTENCIA ==========
+  // Persistencia
   useEffect(() => {
     if (hasRestoredRef.current) return;
-
     const loadState = async () => {
-      const { queue: savedQueue, originalQueue: savedOriginalQueue, state } =
-        await PlaybackPersistenceService.loadPlaybackState();
-
+      const { queue: savedQueue, originalQueue: savedOriginalQueue, state } = await PlaybackPersistenceService.loadPlaybackState();
       if (savedQueue.length > 0 && state && state.currentIndex >= 0) {
         setQueue(savedQueue);
         setOriginalQueue(savedOriginalQueue);
         setCurrentIndex(state.currentIndex);
         setShuffleMode(state.shuffleMode);
         setRepeatMode(state.repeatMode);
-        
-        if (state.position > 0) {
-          setPosition(state.position * 1000);
-        }
+        if (state.position > 0) setPosition(state.position * 1000);
       }
       hasRestoredRef.current = true;
     };
-
     loadState();
   }, []);
 
   useEffect(() => {
     if (!currentTrack || currentIndex < 0) return;
-
     if (!saveIntervalRef.current) {
       saveIntervalRef.current = setInterval(() => {
         PlaybackPersistenceService.savePlaybackState(
-          queue,
-          originalQueue,
-          currentIndex,
-          position / 1000,
-          isPlaying,
-          shuffleMode,
-          repeatMode
+          queue, originalQueue, currentIndex,
+          position / 1000, isPlaying, shuffleMode, repeatMode
         );
       }, 3000);
     }
-
     return () => {
       if (saveIntervalRef.current) {
         clearInterval(saveIntervalRef.current);
@@ -185,103 +154,97 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, [currentTrack, currentIndex, queue, originalQueue, position, isPlaying, shuffleMode, repeatMode]);
 
-  // Guardar al cambiar estado de la app
   useEffect(() => {
     const handleAppStateChange = async (nextAppState: string) => {
-      if (nextAppState === 'background') {
-        if (currentTrack && currentIndex >= 0) {
-          await PlaybackPersistenceService.savePlaybackState(
-            queue,
-            originalQueue,
-            currentIndex,
-            position / 1000,
-            isPlaying,
-            shuffleMode,
-            repeatMode
-          );
-        }
+      if (nextAppState === 'background' && currentTrack && currentIndex >= 0) {
+        await PlaybackPersistenceService.savePlaybackState(
+          queue, originalQueue, currentIndex,
+          position / 1000, isPlaying, shuffleMode, repeatMode
+        );
       }
     };
-
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => subscription.remove();
   }, [currentTrack, currentIndex, queue, originalQueue, position, isPlaying, shuffleMode, repeatMode]);
 
   // ========== REPRODUCCIÓN ==========
+  const stopCurrentAudio = () => {
+    if (sourceRef.current) {
+      try {
+        sourceRef.current.stop();
+        sourceRef.current.onended = null; // eliminar listener anterior
+      } catch (e) {}
+      sourceRef.current = null;
+    }
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+  };
+
   const playAudio = async (track: StoredTrack, startSeconds = 0) => {
     try {
       if (!audioContextRef.current) return;
 
-      // Detener reproducción anterior
-      if (sourceRef.current) {
-        sourceRef.current.stop();
-        sourceRef.current = null;
-      }
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null;
-      }
+      stopCurrentAudio();
 
-      // Obtener URL
       const url = track.localUri || await MonochromeAPI.getPlayableUrl(track.id);
       if (!url) return;
 
-      // Cargar audio
       const response = await fetch(url);
       const arrayBuffer = await response.arrayBuffer();
       const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
 
-      // Crear fuente
-      sourceRef.current = audioContextRef.current.createBufferSource();
-      sourceRef.current.buffer = audioBuffer;
-      sourceRef.current.connect(audioContextRef.current.destination);
+      const newSource = audioContextRef.current.createBufferSource();
+      newSource.buffer = audioBuffer;
+      newSource.connect(audioContextRef.current.destination);
 
       // Manejar fin de canción
-      sourceRef.current.onended = () => {
-        if (repeatMode === 'one') {
-          playAudio(track, 0);
-        } else if (hasNext) {
-          playNext();
-        } else if (repeatMode === 'all' && queue.length > 0) {
-          setCurrentIndex(0);
-          playAudio(queue[0], 0);
-        } else {
-          setIsPlaying(false);
+      newSource.onEnded = () => {
+        // Asegurar que es el final natural (no por stop)
+        if (sourceRef.current === newSource) {
+          if (repeatMode === 'one') {
+            playAudio(track, 0);
+          } else if (hasNext) {
+            playNext();
+          } else if (repeatMode === 'all' && queue.length > 0) {
+            setCurrentIndex(0);
+            playAudio(queue[0], 0);
+          } else {
+            setIsPlaying(false);
+            setPosition(duration); // opcional: marcar como terminado
+          }
         }
       };
 
-      // Reanudar contexto si está suspendido
+      sourceRef.current = newSource;
+
       if (audioContextRef.current.state === 'suspended') {
         await audioContextRef.current.resume();
       }
+
+      // Importante: guardar el tiempo de inicio justo antes de start
+      const startTime = audioContextRef.current.currentTime;
+      newSource.start(0, startSeconds);
       
-      // Iniciar reproducción
-      sourceRef.current.start(0, startSeconds);
-      startTimeRef.current = audioContextRef.current.currentTime - startSeconds;
+      startTimeRef.current = startTime - startSeconds; // esto nos dará el tiempo base correcto
       setIsPlaying(true);
       setDuration(audioBuffer.duration * 1000);
       setPosition(startSeconds * 1000);
 
-      // ✅ INTERVALO CORREGIDO - SIN LOOPS
-      intervalRef.current = setInterval(() => {
-        if (audioContextRef.current && sourceRef.current) {
-          if (isPlaying) {
-            const elapsed = (audioContextRef.current.currentTime - startTimeRef.current) * 1000;
-            // Usar requestAnimationFrame para evitar loops
-            if (animationFrameRef.current) {
-              cancelAnimationFrame(animationFrameRef.current);
-            }
-            animationFrameRef.current = requestAnimationFrame(() => {
-              setPosition(Math.min(elapsed, duration));
-              animationFrameRef.current = null;
-            });
-          }
+      // Iniciar intervalo de actualización de posición (usando requestAnimationFrame para mayor precisión)
+      const updatePosition = () => {
+        if (audioContextRef.current && sourceRef.current && isPlaying && !isSeekingRef.current) {
+          const elapsed = (audioContextRef.current.currentTime - startTimeRef.current) * 1000;
+          setPosition(Math.min(elapsed, duration));
         }
-      }, 500); // 500ms es suficiente para una barra suave
+        animationFrameRef.current = requestAnimationFrame(updatePosition);
+      };
+      animationFrameRef.current = requestAnimationFrame(updatePosition);
 
     } catch (error) {
       console.log('Error playing audio:', error);
@@ -296,12 +259,8 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     playlistId?: string
   ) => {
     try {
-      console.log('🎵 playTrack llamado:', track.title);
-
-      // Guardar en historial
       await PlayHistoryService.addToHistory(track, source, playlistId);
 
-      // Convertir a QueueItems
       const queueItems: QueueItem[] = tracks.map((t, i) => ({
         ...t,
         queueId: `${t.id}_${Date.now()}_${i}`,
@@ -311,7 +270,6 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
 
       setOriginalQueue(queueItems);
 
-      // Aplicar shuffle si está activado
       if (shuffleMode) {
         const shuffled = [...queueItems];
         for (let i = shuffled.length - 1; i > 0; i--) {
@@ -327,10 +285,7 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
       }
 
       setShowExpanded(true);
-
-      // Reproducir el track
       await playAudio(track);
-
     } catch (error) {
       console.log('Error in playTrack:', error);
     }
@@ -346,16 +301,12 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
 
   const togglePlayPause = async () => {
     if (!audioContextRef.current || !sourceRef.current) return;
-
     if (isPlaying) {
-      // ⏸️ PAUSAR
       await audioContextRef.current.suspend();
       setIsPlaying(false);
-      // La posición se mantiene porque el intervalo ya no actualiza
     } else {
-      // ▶️ REANUDAR
       await audioContextRef.current.resume();
-      // Recalcular startTime basado en la posición actual
+      // Recalcular startTime para que la posición continúe correctamente
       startTimeRef.current = audioContextRef.current.currentTime - (position / 1000);
       setIsPlaying(true);
     }
@@ -363,7 +314,12 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
 
   const seekTo = async (seconds: number) => {
     if (!currentTrack) return;
-    await playAudio(currentTrack, seconds);
+    isSeekingRef.current = true;
+    // Guardamos la canción actual y la posición deseada
+    const track = currentTrack;
+    // Reiniciamos la reproducción desde la nueva posición
+    await playAudio(track, seconds);
+    isSeekingRef.current = false;
   };
 
   const playNext = async () => {
@@ -371,7 +327,6 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
       if (currentTrack) await playAudio(currentTrack, 0);
       return;
     }
-
     if (hasNext) {
       const nextTrack = queue[currentIndex + 1];
       await PlayHistoryService.addToHistory(nextTrack, nextTrack.source, nextTrack.playlistId);
@@ -403,13 +358,9 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
-  // ========== GESTIÓN DE COLA ==========
+  // Gestión de cola (sin cambios)
   const addToQueue = (track: StoredTrack, position: 'next' | 'end' = 'end') => {
-    const queueItem: QueueItem = {
-      ...track,
-      queueId: `${track.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-    };
-
+    const queueItem: QueueItem = { ...track, queueId: `${track.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}` };
     setQueue(prev => {
       const newQueue = [...prev];
       if (position === 'next' && currentIndex >= 0) {
@@ -419,16 +370,11 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
       }
       return newQueue;
     });
-
     setOriginalQueue(prev => [...prev, queueItem]);
   };
 
   const addTracksToQueue = (tracks: StoredTrack[], position: 'next' | 'end' = 'end') => {
-    const queueItems: QueueItem[] = tracks.map(track => ({
-      ...track,
-      queueId: `${track.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-    }));
-
+    const queueItems = tracks.map(track => ({ ...track, queueId: `${track.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}` }));
     setQueue(prev => {
       const newQueue = [...prev];
       if (position === 'next' && currentIndex >= 0) {
@@ -438,27 +384,18 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
       }
       return newQueue;
     });
-
     setOriginalQueue(prev => [...prev, ...queueItems]);
   };
 
   const removeFromQueue = (index: number) => {
-    if (index === currentIndex) {
-      playNext();
-    }
-
+    if (index === currentIndex) playNext();
     setQueue(prev => prev.filter((_, i) => i !== index));
     setOriginalQueue(prev => prev.filter((_, i) => i !== index));
-
-    if (index < currentIndex) {
-      setCurrentIndex(prev => prev - 1);
-    }
+    if (index < currentIndex) setCurrentIndex(prev => prev - 1);
   };
 
   const clearQueue = async () => {
-    if (sourceRef.current) {
-      sourceRef.current.stop();
-    }
+    stopCurrentAudio();
     setQueue([]);
     setOriginalQueue([]);
     setCurrentIndex(-1);
@@ -472,31 +409,22 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
       const newQueue = [...prev];
       const [movedItem] = newQueue.splice(fromIndex, 1);
       newQueue.splice(toIndex, 0, movedItem);
-
-      if (fromIndex === currentIndex) {
-        setCurrentIndex(toIndex);
-      } else if (fromIndex < currentIndex && toIndex >= currentIndex) {
-        setCurrentIndex(prev => prev - 1);
-      } else if (fromIndex > currentIndex && toIndex <= currentIndex) {
-        setCurrentIndex(prev => prev + 1);
-      }
-
+      if (fromIndex === currentIndex) setCurrentIndex(toIndex);
+      else if (fromIndex < currentIndex && toIndex >= currentIndex) setCurrentIndex(prev => prev - 1);
+      else if (fromIndex > currentIndex && toIndex <= currentIndex) setCurrentIndex(prev => prev + 1);
       return newQueue;
     });
   };
 
-  // ========== MODOS ==========
   const toggleShuffle = () => {
     setShuffleMode(prev => {
       const newShuffle = !prev;
-
       if (newShuffle && originalQueue.length > 0) {
         const shuffled = [...originalQueue];
         for (let i = shuffled.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
           [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
         }
-        
         if (currentTrack) {
           const currentId = currentTrack.id;
           const newIndex = shuffled.findIndex(t => t.id === currentId);
@@ -505,7 +433,6 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
             setCurrentIndex(0);
           }
         }
-        
         setQueue(shuffled);
       } else if (!newShuffle) {
         setQueue(originalQueue);
@@ -514,7 +441,6 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
           setCurrentIndex(newIndex >= 0 ? newIndex : 0);
         }
       }
-
       return newShuffle;
     });
   };
