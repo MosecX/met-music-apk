@@ -228,7 +228,7 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
       sourceRef.current.buffer = audioBuffer;
       sourceRef.current.connect(audioContextRef.current.destination);
 
-      // Manejar fin de canción (CORREGIDO: onEnded)
+      // Manejar fin de canción
       sourceRef.current.onEnded = () => {
         stopCurrentAudio().then(() => {
           if (repeatMode === 'one') {
@@ -335,7 +335,7 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
       setIsPlaying(false);
     } else {
       await audioContextRef.current.resume();
-      startTimeRef.current = audioContextRef.current.currentTime - (position / 1000);
+      // ✅ NO recalculamos startTimeRef, así la barra continúa desde donde se pausó
       setIsPlaying(true);
     }
   };
