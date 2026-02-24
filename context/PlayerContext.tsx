@@ -27,7 +27,7 @@ interface PlayerContextType {
   addToQueue: (track: StoredTrack, position?: 'next' | 'end') => void;
   addTracksToQueue: (tracks: StoredTrack[], position?: 'next' | 'end') => void;
   removeFromQueue: (index: number) => void;
-  clearQueue: () => void;
+  clearQueue: () => Promise<void>;
   moveInQueue: (fromIndex: number, toIndex: number) => void;
   toggleShuffle: () => void;
   toggleRepeat: () => void;
@@ -63,14 +63,13 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
   const saveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const hasRestoredRef = useRef(false);
   const animationFrameRef = useRef<number | null>(null);
-  const isSeekingRef = useRef(false);
 
   const currentTrack = currentIndex >= 0 ? queue[currentIndex] : null;
   const hasNext = currentIndex < queue.length - 1;
   const hasPrev = currentIndex > 0;
   const queueLength = queue.length;
 
-  // Inicialización
+  // ========== INICIALIZACIÓN ==========
   useEffect(() => {
     audioContextRef.current = new AudioContext();
     console.log('✅ AudioContext creado');
@@ -84,7 +83,7 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, []);
 
-  // Notificación
+  // ========== NOTIFICACIÓN ==========
   useEffect(() => {
     const setupNotif = async () => {
       await PlaybackNotificationManager.enableControl('play', true);
@@ -118,34 +117,47 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     });
   }, [currentTrack, position, isPlaying, duration]);
 
-  // Persistencia
+  // ========== PERSISTENCIA ==========
   useEffect(() => {
     if (hasRestoredRef.current) return;
+
     const loadState = async () => {
-      const { queue: savedQueue, originalQueue: savedOriginalQueue, state } = await PlaybackPersistenceService.loadPlaybackState();
+      const { queue: savedQueue, originalQueue: savedOriginalQueue, state } =
+        await PlaybackPersistenceService.loadPlaybackState();
+
       if (savedQueue.length > 0 && state && state.currentIndex >= 0) {
         setQueue(savedQueue);
         setOriginalQueue(savedOriginalQueue);
         setCurrentIndex(state.currentIndex);
         setShuffleMode(state.shuffleMode);
         setRepeatMode(state.repeatMode);
-        if (state.position > 0) setPosition(state.position * 1000);
+        if (state.position > 0) {
+          setPosition(state.position * 1000);
+        }
       }
       hasRestoredRef.current = true;
     };
+
     loadState();
   }, []);
 
   useEffect(() => {
     if (!currentTrack || currentIndex < 0) return;
+
     if (!saveIntervalRef.current) {
       saveIntervalRef.current = setInterval(() => {
         PlaybackPersistenceService.savePlaybackState(
-          queue, originalQueue, currentIndex,
-          position / 1000, isPlaying, shuffleMode, repeatMode
+          queue,
+          originalQueue,
+          currentIndex,
+          position / 1000,
+          isPlaying,
+          shuffleMode,
+          repeatMode
         );
       }, 3000);
     }
+
     return () => {
       if (saveIntervalRef.current) {
         clearInterval(saveIntervalRef.current);
@@ -156,57 +168,69 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     const handleAppStateChange = async (nextAppState: string) => {
-      if (nextAppState === 'background' && currentTrack && currentIndex >= 0) {
-        await PlaybackPersistenceService.savePlaybackState(
-          queue, originalQueue, currentIndex,
-          position / 1000, isPlaying, shuffleMode, repeatMode
-        );
+      if (nextAppState === 'background') {
+        if (currentTrack && currentIndex >= 0) {
+          await PlaybackPersistenceService.savePlaybackState(
+            queue,
+            originalQueue,
+            currentIndex,
+            position / 1000,
+            isPlaying,
+            shuffleMode,
+            repeatMode
+          );
+        }
       }
     };
+
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => subscription.remove();
   }, [currentTrack, currentIndex, queue, originalQueue, position, isPlaying, shuffleMode, repeatMode]);
 
-  // ========== REPRODUCCIÓN ==========
-  const stopCurrentAudio = () => {
+  // ========== FUNCIÓN AUXILIAR PARA DETENER TODO LIMPIAMENTE ==========
+  const stopCurrentAudio = async () => {
     if (sourceRef.current) {
       try {
         sourceRef.current.stop();
-        sourceRef.current.onended = null; // eliminar listener anterior
-      } catch (e) {}
+      } catch (e) {
+        // Ignorar error si ya estaba detenido
+      }
       sourceRef.current = null;
+    }
+    if (audioContextRef.current && audioContextRef.current.state === 'running') {
+      await audioContextRef.current.suspend();
     }
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
-    }
   };
 
+  // ========== REPRODUCCIÓN ==========
   const playAudio = async (track: StoredTrack, startSeconds = 0) => {
     try {
       if (!audioContextRef.current) return;
 
-      stopCurrentAudio();
+      // Detener cualquier reproducción previa
+      await stopCurrentAudio();
 
+      // Obtener URL
       const url = track.localUri || await MonochromeAPI.getPlayableUrl(track.id);
       if (!url) return;
 
+      // Cargar audio
       const response = await fetch(url);
       const arrayBuffer = await response.arrayBuffer();
       const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
 
-      const newSource = audioContextRef.current.createBufferSource();
-      newSource.buffer = audioBuffer;
-      newSource.connect(audioContextRef.current.destination);
+      // Crear nueva fuente
+      sourceRef.current = audioContextRef.current.createBufferSource();
+      sourceRef.current.buffer = audioBuffer;
+      sourceRef.current.connect(audioContextRef.current.destination);
 
-      // Manejar fin de canción
-      newSource.onEnded = () => {
-        // Asegurar que es el final natural (no por stop)
-        if (sourceRef.current === newSource) {
+      // Manejar fin de canción (CORREGIDO: onEnded)
+      sourceRef.current.onEnded = () => {
+        stopCurrentAudio().then(() => {
           if (repeatMode === 'one') {
             playAudio(track, 0);
           } else if (hasNext) {
@@ -216,35 +240,32 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
             playAudio(queue[0], 0);
           } else {
             setIsPlaying(false);
-            setPosition(duration); // opcional: marcar como terminado
+            setPosition(0);
           }
-        }
+        });
       };
 
-      sourceRef.current = newSource;
-
+      // Reanudar contexto si está suspendido
       if (audioContextRef.current.state === 'suspended') {
         await audioContextRef.current.resume();
       }
 
-      // Importante: guardar el tiempo de inicio justo antes de start
-      const startTime = audioContextRef.current.currentTime;
-      newSource.start(0, startSeconds);
-      
-      startTimeRef.current = startTime - startSeconds; // esto nos dará el tiempo base correcto
+      // Iniciar reproducción
+      sourceRef.current.start(0, startSeconds);
+      startTimeRef.current = audioContextRef.current.currentTime - startSeconds;
       setIsPlaying(true);
       setDuration(audioBuffer.duration * 1000);
       setPosition(startSeconds * 1000);
 
-      // Iniciar intervalo de actualización de posición (usando requestAnimationFrame para mayor precisión)
-      const updatePosition = () => {
-        if (audioContextRef.current && sourceRef.current && isPlaying && !isSeekingRef.current) {
+      // Intervalo de posición
+      intervalRef.current = setInterval(() => {
+        if (audioContextRef.current && sourceRef.current && isPlaying) {
           const elapsed = (audioContextRef.current.currentTime - startTimeRef.current) * 1000;
-          setPosition(Math.min(elapsed, duration));
+          requestAnimationFrame(() => {
+            setPosition(Math.min(elapsed, duration));
+          });
         }
-        animationFrameRef.current = requestAnimationFrame(updatePosition);
-      };
-      animationFrameRef.current = requestAnimationFrame(updatePosition);
+      }, 500);
 
     } catch (error) {
       console.log('Error playing audio:', error);
@@ -259,6 +280,11 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     playlistId?: string
   ) => {
     try {
+      console.log('🎵 playTrack llamado:', track.title);
+
+      // Detener cualquier audio actual ANTES de cambiar la cola
+      await stopCurrentAudio();
+
       await PlayHistoryService.addToHistory(track, source, playlistId);
 
       const queueItems: QueueItem[] = tracks.map((t, i) => ({
@@ -285,7 +311,9 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
       }
 
       setShowExpanded(true);
+
       await playAudio(track);
+
     } catch (error) {
       console.log('Error in playTrack:', error);
     }
@@ -301,12 +329,12 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
 
   const togglePlayPause = async () => {
     if (!audioContextRef.current || !sourceRef.current) return;
+
     if (isPlaying) {
       await audioContextRef.current.suspend();
       setIsPlaying(false);
     } else {
       await audioContextRef.current.resume();
-      // Recalcular startTime para que la posición continúe correctamente
       startTimeRef.current = audioContextRef.current.currentTime - (position / 1000);
       setIsPlaying(true);
     }
@@ -314,12 +342,7 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
 
   const seekTo = async (seconds: number) => {
     if (!currentTrack) return;
-    isSeekingRef.current = true;
-    // Guardamos la canción actual y la posición deseada
-    const track = currentTrack;
-    // Reiniciamos la reproducción desde la nueva posición
-    await playAudio(track, seconds);
-    isSeekingRef.current = false;
+    await playAudio(currentTrack, seconds);
   };
 
   const playNext = async () => {
@@ -327,6 +350,7 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
       if (currentTrack) await playAudio(currentTrack, 0);
       return;
     }
+
     if (hasNext) {
       const nextTrack = queue[currentIndex + 1];
       await PlayHistoryService.addToHistory(nextTrack, nextTrack.source, nextTrack.playlistId);
@@ -358,9 +382,13 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
-  // Gestión de cola (sin cambios)
+  // ========== GESTIÓN DE COLA ==========
   const addToQueue = (track: StoredTrack, position: 'next' | 'end' = 'end') => {
-    const queueItem: QueueItem = { ...track, queueId: `${track.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}` };
+    const queueItem: QueueItem = {
+      ...track,
+      queueId: `${track.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    };
+
     setQueue(prev => {
       const newQueue = [...prev];
       if (position === 'next' && currentIndex >= 0) {
@@ -370,11 +398,16 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
       }
       return newQueue;
     });
+
     setOriginalQueue(prev => [...prev, queueItem]);
   };
 
   const addTracksToQueue = (tracks: StoredTrack[], position: 'next' | 'end' = 'end') => {
-    const queueItems = tracks.map(track => ({ ...track, queueId: `${track.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}` }));
+    const queueItems: QueueItem[] = tracks.map(track => ({
+      ...track,
+      queueId: `${track.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    }));
+
     setQueue(prev => {
       const newQueue = [...prev];
       if (position === 'next' && currentIndex >= 0) {
@@ -384,23 +417,32 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
       }
       return newQueue;
     });
+
     setOriginalQueue(prev => [...prev, ...queueItems]);
   };
 
   const removeFromQueue = (index: number) => {
-    if (index === currentIndex) playNext();
+    if (index === currentIndex) {
+      playNext();
+    }
+
     setQueue(prev => prev.filter((_, i) => i !== index));
     setOriginalQueue(prev => prev.filter((_, i) => i !== index));
-    if (index < currentIndex) setCurrentIndex(prev => prev - 1);
+
+    if (index < currentIndex) {
+      setCurrentIndex(prev => prev - 1);
+    }
   };
 
   const clearQueue = async () => {
-    stopCurrentAudio();
+    await stopCurrentAudio();
     setQueue([]);
     setOriginalQueue([]);
     setCurrentIndex(-1);
     setIsPlaying(false);
     setPosition(0);
+    setDuration(0);
+    setShowExpanded(false);
     await PlaybackPersistenceService.clearPlaybackState();
   };
 
@@ -409,16 +451,24 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
       const newQueue = [...prev];
       const [movedItem] = newQueue.splice(fromIndex, 1);
       newQueue.splice(toIndex, 0, movedItem);
-      if (fromIndex === currentIndex) setCurrentIndex(toIndex);
-      else if (fromIndex < currentIndex && toIndex >= currentIndex) setCurrentIndex(prev => prev - 1);
-      else if (fromIndex > currentIndex && toIndex <= currentIndex) setCurrentIndex(prev => prev + 1);
+
+      if (fromIndex === currentIndex) {
+        setCurrentIndex(toIndex);
+      } else if (fromIndex < currentIndex && toIndex >= currentIndex) {
+        setCurrentIndex(prev => prev - 1);
+      } else if (fromIndex > currentIndex && toIndex <= currentIndex) {
+        setCurrentIndex(prev => prev + 1);
+      }
+
       return newQueue;
     });
   };
 
+  // ========== MODOS ==========
   const toggleShuffle = () => {
     setShuffleMode(prev => {
       const newShuffle = !prev;
+
       if (newShuffle && originalQueue.length > 0) {
         const shuffled = [...originalQueue];
         for (let i = shuffled.length - 1; i > 0; i--) {
@@ -441,6 +491,7 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
           setCurrentIndex(newIndex >= 0 ? newIndex : 0);
         }
       }
+
       return newShuffle;
     });
   };
