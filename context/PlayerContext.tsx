@@ -56,6 +56,24 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
 
+  // Refs para valores que se usan en callbacks asíncronos (evitan closures obsoletos)
+  const queueRef = useRef<QueueItem[]>([]);
+  const currentIndexRef = useRef<number>(-1);
+  const repeatModeRef = useRef<'off' | 'all' | 'one'>('off');
+  const isPlayingRef = useRef<boolean>(false);
+  const positionRef = useRef<number>(0);
+  const durationRef = useRef<number>(0);
+
+  // Sincronizar refs con estado
+  useEffect(() => {
+    queueRef.current = queue;
+    currentIndexRef.current = currentIndex;
+    repeatModeRef.current = repeatMode;
+    isPlayingRef.current = isPlaying;
+    positionRef.current = position;
+    durationRef.current = duration;
+  }, [queue, currentIndex, repeatMode, isPlaying, position, duration]);
+
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<any>(null);
   const startTimeRef = useRef(0);
@@ -63,6 +81,7 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
   const saveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const hasRestoredRef = useRef(false);
   const animationFrameRef = useRef<number | null>(null);
+  const isTransitioningRef = useRef<boolean>(false); // Para evitar llamadas múltiples
 
   const currentTrack = currentIndex >= 0 ? queue[currentIndex] : null;
   const hasNext = currentIndex < queue.length - 1;
@@ -93,17 +112,21 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
       await PlaybackNotificationManager.enableControl('seekTo', true);
 
       PlaybackNotificationManager.addEventListener('playbackNotificationPlay', () => {
-        if (!isPlaying) togglePlayPause();
+        if (!isPlayingRef.current) togglePlayPause();
       });
       PlaybackNotificationManager.addEventListener('playbackNotificationPause', () => {
-        if (isPlaying) togglePlayPause();
+        if (isPlayingRef.current) togglePlayPause();
       });
-      PlaybackNotificationManager.addEventListener('playbackNotificationNext', playNext);
-      PlaybackNotificationManager.addEventListener('playbackNotificationPrevious', playPrevious);
+      PlaybackNotificationManager.addEventListener('playbackNotificationNext', () => {
+        playNext();
+      });
+      PlaybackNotificationManager.addEventListener('playbackNotificationPrevious', () => {
+        playPrevious();
+      });
       PlaybackNotificationManager.addEventListener('playbackNotificationSeekTo', (e) => seekTo(e.value));
     };
     setupNotif();
-  }, [isPlaying]);
+  }, []);
 
   useEffect(() => {
     if (!currentTrack) return;
@@ -192,13 +215,12 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     if (sourceRef.current) {
       try {
         sourceRef.current.stop();
-      } catch (e) {
-        // Ignorar error si ya estaba detenido
-      }
+      } catch (e) {}
       sourceRef.current = null;
     }
     if (audioContextRef.current && audioContextRef.current.state === 'running') {
       await audioContextRef.current.suspend();
+      await new Promise(resolve => setTimeout(resolve, 20));
     }
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
@@ -211,33 +233,36 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     try {
       if (!audioContextRef.current) return;
 
-      // Detener cualquier reproducción previa
       await stopCurrentAudio();
+      await new Promise(resolve => setTimeout(resolve, 10));
 
-      // Obtener URL
       const url = track.localUri || await MonochromeAPI.getPlayableUrl(track.id);
       if (!url) return;
 
-      // Cargar audio
       const response = await fetch(url);
       const arrayBuffer = await response.arrayBuffer();
       const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
 
-      // Crear nueva fuente
       sourceRef.current = audioContextRef.current.createBufferSource();
       sourceRef.current.buffer = audioBuffer;
       sourceRef.current.connect(audioContextRef.current.destination);
 
-      // Manejar fin de canción
       sourceRef.current.onEnded = () => {
+        // Usar refs para obtener valores actualizados
+        const currentRepeat = repeatModeRef.current;
+        const currentIdx = currentIndexRef.current;
+        const currentQueue = queueRef.current;
+
         stopCurrentAudio().then(() => {
-          if (repeatMode === 'one') {
+          isTransitioningRef.current = false;
+
+          if (currentRepeat === 'one') {
             playAudio(track, 0);
-          } else if (hasNext) {
+          } else if (currentIdx < currentQueue.length - 1) {
             playNext();
-          } else if (repeatMode === 'all' && queue.length > 0) {
+          } else if (currentRepeat === 'all' && currentQueue.length > 0) {
             setCurrentIndex(0);
-            playAudio(queue[0], 0);
+            playAudio(currentQueue[0], 0);
           } else {
             setIsPlaying(false);
             setPosition(0);
@@ -245,24 +270,21 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
         });
       };
 
-      // Reanudar contexto si está suspendido
       if (audioContextRef.current.state === 'suspended') {
         await audioContextRef.current.resume();
       }
 
-      // Iniciar reproducción
       sourceRef.current.start(0, startSeconds);
       startTimeRef.current = audioContextRef.current.currentTime - startSeconds;
       setIsPlaying(true);
       setDuration(audioBuffer.duration * 1000);
       setPosition(startSeconds * 1000);
 
-      // Intervalo de posición
       intervalRef.current = setInterval(() => {
-        if (audioContextRef.current && sourceRef.current && isPlaying) {
+        if (audioContextRef.current && sourceRef.current && isPlayingRef.current) {
           const elapsed = (audioContextRef.current.currentTime - startTimeRef.current) * 1000;
           requestAnimationFrame(() => {
-            setPosition(Math.min(elapsed, duration));
+            setPosition(Math.min(elapsed, durationRef.current));
           });
         }
       }, 500);
@@ -282,8 +304,9 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     try {
       console.log('🎵 playTrack llamado:', track.title);
 
-      // Detener cualquier audio actual ANTES de cambiar la cola
       await stopCurrentAudio();
+      // Esperar a que termine la transición
+      isTransitioningRef.current = true;
 
       await PlayHistoryService.addToHistory(track, source, playlistId);
 
@@ -311,16 +334,17 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
       }
 
       setShowExpanded(true);
-
       await playAudio(track);
+      isTransitioningRef.current = false;
 
     } catch (error) {
       console.log('Error in playTrack:', error);
+      isTransitioningRef.current = false;
     }
   };
 
   const playTrackAtIndex = async (index: number) => {
-    if (index >= 0 && index < queue.length) {
+    if (index >= 0 && index < queue.length && !isTransitioningRef.current) {
       const track = queue[index];
       setCurrentIndex(index);
       await playAudio(track);
@@ -335,50 +359,72 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
       setIsPlaying(false);
     } else {
       await audioContextRef.current.resume();
-      // ✅ NO recalculamos startTimeRef, así la barra continúa desde donde se pausó
       setIsPlaying(true);
     }
   };
 
   const seekTo = async (seconds: number) => {
-    if (!currentTrack) return;
+    if (!currentTrack || isTransitioningRef.current) return;
     await playAudio(currentTrack, seconds);
   };
 
   const playNext = async () => {
-    if (repeatMode === 'one') {
-      if (currentTrack) await playAudio(currentTrack, 0);
+    if (isTransitioningRef.current) return;
+    isTransitioningRef.current = true;
+
+    const currentRepeat = repeatModeRef.current;
+    const currentIdx = currentIndexRef.current;
+    const currentQueue = queueRef.current;
+
+    if (currentRepeat === 'one' && currentTrack) {
+      await playAudio(currentTrack, 0);
+      isTransitioningRef.current = false;
       return;
     }
 
-    if (hasNext) {
-      const nextTrack = queue[currentIndex + 1];
+    if (currentIdx < currentQueue.length - 1) {
+      const nextTrack = currentQueue[currentIdx + 1];
       await PlayHistoryService.addToHistory(nextTrack, nextTrack.source, nextTrack.playlistId);
-      setCurrentIndex(currentIndex + 1);
+      setCurrentIndex(currentIdx + 1);
       await playAudio(nextTrack);
-    } else if (repeatMode === 'all' && queue.length > 0) {
-      const firstTrack = queue[0];
+    } else if (currentRepeat === 'all' && currentQueue.length > 0) {
+      const firstTrack = currentQueue[0];
       await PlayHistoryService.addToHistory(firstTrack, firstTrack.source, firstTrack.playlistId);
       setCurrentIndex(0);
       await playAudio(firstTrack);
+    } else {
+      // No hay siguiente, pausar
+      if (isPlaying) {
+        await togglePlayPause();
+      }
+      isTransitioningRef.current = false;
     }
   };
 
   const playPrevious = async () => {
-    if (position > 3000) {
+    if (isTransitioningRef.current) return;
+    isTransitioningRef.current = true;
+
+    const currentPos = positionRef.current;
+    const currentIdx = currentIndexRef.current;
+    const currentQueue = queueRef.current;
+
+    if (currentPos > 3000) {
       if (currentTrack) await playAudio(currentTrack, 0);
-    } else if (hasPrev) {
-      const prevTrack = queue[currentIndex - 1];
+      isTransitioningRef.current = false;
+    } else if (currentIdx > 0) {
+      const prevTrack = currentQueue[currentIdx - 1];
       await PlayHistoryService.addToHistory(prevTrack, prevTrack.source, prevTrack.playlistId);
-      setCurrentIndex(currentIndex - 1);
+      setCurrentIndex(currentIdx - 1);
       await playAudio(prevTrack);
-    } else if (repeatMode === 'all' && queue.length > 0) {
-      const lastTrack = queue[queue.length - 1];
+    } else if (repeatModeRef.current === 'all' && currentQueue.length > 0) {
+      const lastTrack = currentQueue[currentQueue.length - 1];
       await PlayHistoryService.addToHistory(lastTrack, lastTrack.source, lastTrack.playlistId);
-      setCurrentIndex(queue.length - 1);
+      setCurrentIndex(currentQueue.length - 1);
       await playAudio(lastTrack);
     } else {
       if (currentTrack) await playAudio(currentTrack, 0);
+      isTransitioningRef.current = false;
     }
   };
 
