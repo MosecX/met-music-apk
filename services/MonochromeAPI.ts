@@ -1,79 +1,52 @@
+// services/MonochromeAPI.ts
+
 const RATE_LIMIT_ERROR_MESSAGE = 'Rate limit exceeded';
 
-// Interfaz para las instancias de API
 interface InstancesResponse {
   api: string[];
   streaming: string[];
 }
 
 class MonochromeAPI {
-  private INSTANCES_URL = 'https://raw.githubusercontent.com/Monochrome-music/monochrome/main/public/instances.json';
-  private apiInstances: string[] = [];
-  private streamingInstances: string[] = [];
+  // Forzamos la base url fija como una constante de la clase
+  private readonly BASE_URL = 'https://api.monochrome.tf';
   private streamCache: Map<string, string> = new Map();
   private abortController: AbortController | null = null;
 
   constructor() {
-    // Precargar instancias al iniciar
-    this.loadInstances();
+    console.log(`✅ MonochromeAPI inicializada de forma exclusiva en: ${this.BASE_URL}`);
   }
 
-  // Cargar instancias desde GitHub
-  async loadInstances(): Promise<void> {
-    try {
-      const response = await fetch(this.INSTANCES_URL);
-      if (!response.ok) throw new Error('Failed to fetch instances');
-      const data: InstancesResponse = await response.json();
-      this.apiInstances = data.api || [];
-      this.streamingInstances = data.streaming || [];
-      console.log(`✅ Cargadas ${this.apiInstances.length} APIs y ${this.streamingInstances.length} streaming`);
-    } catch (error) {
-      console.error('❌ Error cargando instancias:', error);
-      // Fallbacks
-      this.apiInstances = [
-        'https://arran.monochrome.tf',
-        'https://api.monochrome.tf',
-        'https://triton.squid.wtf',
-        'https://wolf.qqdl.site',
-      ];
-      this.streamingInstances = [...this.apiInstances];
-    }
-  }
-
-  // Obtener instancias según tipo
+  /**
+   * Mantenemos el método para no romper la compatibilidad si otros componentes 
+   * de tu app lo consumen, pero devolviendo estrictamente la URL deseada.
+   */
   async getInstances(type: 'api' | 'streaming' = 'api'): Promise<string[]> {
-    if (this.apiInstances.length === 0) {
-      await this.loadInstances();
-    }
-    return type === 'api' ? this.apiInstances : this.streamingInstances;
+    return [this.BASE_URL];
   }
 
-  // Fetch con retry entre instancias
+  // Carga de instancias deprecada de forma segura
+  async loadInstances(): Promise<void> {
+    // Ya no requerimos consultar recursos externos de GitHub, usamos la instancia fija.
+    console.log(`🔒 Instancia estática fijada: ${this.BASE_URL}`);
+  }
+
+  // Fetch con reintentos optimizado exclusivamente sobre la misma API
   async fetchWithRetry(relativePath: string, options: { type?: 'api' | 'streaming'; signal?: AbortSignal } = {}) {
-    const type = options.type || 'api';
-    const instances = await this.getInstances(type);
-    
-    if (instances.length === 0) {
-      throw new Error(`No instances configured for type: ${type}`);
-    }
-
-    const maxTotalAttempts = instances.length * 2;
+    // Al solo haber una instancia, reducimos los reintentos a un máximo de 3 en caso de fallos de red sutiles
+    const maxAttempts = 3;
     let lastError: Error | null = null;
-    let instanceIndex = Math.floor(Math.random() * instances.length);
 
-    for (let attempt = 1; attempt <= maxTotalAttempts; attempt++) {
-      const baseUrl = instances[instanceIndex % instances.length];
-      const cleanBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
-      const cleanPath = relativePath.startsWith('/') ? relativePath : `/${relativePath}`;
-      const url = `${cleanBase}${cleanPath}`;
+    const cleanPath = relativePath.startsWith('/') ? relativePath : `/${relativePath}`;
+    const url = `${this.BASE_URL}${cleanPath}`;
 
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         const response = await fetch(url, { signal: options.signal });
 
         if (response.status === 429) {
-          console.warn(`⚠️ Rate limit en ${baseUrl}, probando siguiente...`);
-          instanceIndex++;
-          await this.delay(500);
+          console.warn(`⚠️ Rate limit alcanzado en ${this.BASE_URL}. Intento ${attempt}/${maxAttempts}. Esperando...`);
+          await this.delay(600);
           continue;
         }
 
@@ -82,23 +55,21 @@ class MonochromeAPI {
         }
 
         if (response.status >= 500) {
-          console.warn(`⚠️ Error ${response.status} en ${baseUrl}, probando siguiente...`);
-          instanceIndex++;
+          console.warn(`⚠️ Error de servidor ${response.status} en la instancia única. Reintentando...`);
+          await this.delay(300);
           continue;
         }
 
-        lastError = new Error(`Request failed with status ${response.status}`);
-        instanceIndex++;
+        lastError = new Error(`Petición fallida con estado HTTP ${response.status}`);
       } catch (error: any) {
         if (error.name === 'AbortError') throw error;
         lastError = error;
-        console.warn(`⚠️ Error de red en ${baseUrl}: ${error.message}`);
-        instanceIndex++;
+        console.warn(`⚠️ Error de red/conexión en la instancia única: ${error.message}`);
         await this.delay(200);
       }
     }
 
-    throw lastError || new Error(`All instances failed for: ${relativePath}`);
+    throw lastError || new Error(`No se pudo conectar con la API única en la ruta: ${relativePath}`);
   }
 
   // Delay helper
@@ -112,7 +83,6 @@ class MonochromeAPI {
       const response = await this.fetchWithRetry(`/search/?s=${encodeURIComponent(query)}`, options);
       const data = await response.json();
       
-      // Buscar la sección de tracks en la respuesta
       const items = this.findItemsInResponse(data, 'tracks');
       
       return items.map((item: any) => this.prepareTrack(item.track || item));
@@ -165,6 +135,7 @@ class MonochromeAPI {
       coverUrl: this.getCoverUrl(normalized.album?.cover),
       duration: normalized.duration || 0,
       quality: normalized.audioQuality || 'LOW',
+      isrc: normalized.isrc || null, // Aseguramos que propague el ISRC nativo de Tidal al mapear
     };
   }
 
@@ -268,35 +239,30 @@ class MonochromeAPI {
     }
   }
 
-  // NUEVO MÉTODO: Obtener recomendaciones basadas en múltiples IDs
+  // Obtener recomendaciones basadas en múltiples IDs
   async getRecommendationsFromHistory(trackIds: number[], limit: number = 20): Promise<any[]> {
     if (trackIds.length === 0) {
       return this.getRecommendations(424698825); // Fallback a default
     }
 
     try {
-      // Usar el ID más reciente para recomendaciones principales
       const mainId = trackIds[0];
       const mainRecommendations = await this.getRecommendations(mainId);
       
-      // Si tenemos más IDs, obtener recomendaciones adicionales
       if (trackIds.length > 1) {
-        const additionalIds = trackIds.slice(1, 3); // Usar hasta 3 IDs diferentes
+        const additionalIds = trackIds.slice(1, 3);
         const additionalPromises = additionalIds.map(id => this.getRecommendations(id));
         const additionalResults = await Promise.all(additionalPromises);
         
-        // Combinar todas las recomendaciones
         const allRecommendations = [
           ...mainRecommendations,
           ...additionalResults.flat()
         ];
         
-        // Eliminar duplicados (por ID)
         const uniqueTracks = Array.from(
           new Map(allRecommendations.map(track => [track.id, track])).values()
         );
         
-        // Mezclar ligeramente para variedad
         const shuffled = uniqueTracks.sort(() => Math.random() - 0.5);
         
         return shuffled.slice(0, limit);
@@ -327,19 +293,15 @@ class MonochromeAPI {
 
   // Método que garantiza una URL reproducible
   async getPlayableUrl(id: number): Promise<string> {
-    // Intentar con HIGH
     let url = await this.getStreamUrl(id, 'HIGH');
     if (url) return url;
 
-    // Intentar con LOSSLESS
     url = await this.getStreamUrl(id, 'LOSSLESS');
     if (url) return url;
 
-    // Intentar con LOW
     url = await this.getStreamUrl(id, 'LOW');
     if (url) return url;
 
-    // Si todo falla, URL de prueba
     console.log('⚠️ Usando URL de prueba');
     return 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3';
   }

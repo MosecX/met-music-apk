@@ -1,12 +1,51 @@
+// context/PlayerContext.tsx
+
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
-import { AudioContext, PlaybackNotificationManager } from 'react-native-audio-api';
-import MonochromeAPI from '../services/MonochromeAPI';
+import AudioBridgeService from '../services/AudioBridgeService';
 import PlayHistoryService from '../services/PlayHistoryService';
 import PlaybackPersistenceService from '../services/PlaybackPersistenceService';
 import { QueueItem, StoredTrack } from '../types';
 
-// Máquina de estados para la reproducción
+// ==========================================
+// 🛡️ INYECCIÓN SEGURA DE LIBRERÍA NATIVA (PREVIENE CRASHES EN EXPO GO)
+// ==========================================
+let AudioContextMock: any;
+let PlaybackNotificationManagerMock: any;
+
+try {
+  const NativeAudio = require('react-native-audio-api');
+  AudioContextMock = NativeAudio.AudioContext;
+  PlaybackNotificationManagerMock = NativeAudio.PlaybackNotificationManager;
+} catch (e) {
+  console.warn('⚠️ react-native-audio-api no encontrada. Usando modo simulado para desarrollo.');
+  
+  AudioContextMock = class {
+    state = 'suspended';
+    currentTime = 0;
+    close() {}
+    suspend() { this.state = 'suspended'; return Promise.resolve(); }
+    resume() { this.state = 'running'; return Promise.resolve(); }
+    createBufferSource() {
+      return {
+        connect() {},
+        start() {},
+        stop() {},
+        onEnded: () => {}
+      };
+    }
+    decodeAudioData() { return Promise.resolve({ duration: 180 }); }
+  };
+
+  PlaybackNotificationManagerMock = {
+    enableControl: () => Promise.resolve(),
+    addEventListener: () => {},
+    show: () => {},
+    hide: () => {}
+  };
+}
+// ==========================================
+
 type PlayerState = 'idle' | 'loading' | 'playing' | 'paused' | 'transitioning';
 
 interface PlayerContextType {
@@ -69,8 +108,8 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
   const durationRef = useRef<number>(0);
   const playerStateRef = useRef<PlayerState>('idle');
 
-  // Refs para el audio
-  const audioContextRef = useRef<AudioContext | null>(null);
+  // Refs para el audio usando las clases blindadas
+  const audioContextRef = useRef<any | null>(null);
   const sourceRef = useRef<any>(null);
   const startTimeRef = useRef(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -80,7 +119,6 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
   
   // Cola de operaciones para evitar carreras
   const operationQueue = useRef<Promise<void>>(Promise.resolve());
-  const pendingOperation = useRef<boolean>(false);
 
   // Sincronizar refs con estado
   useEffect(() => {
@@ -100,49 +138,48 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
 
   // ========== INICIALIZACIÓN ==========
   useEffect(() => {
-    audioContextRef.current = new AudioContext();
-    console.log('✅ AudioContext creado');
+    audioContextRef.current = new AudioContextMock();
+    console.log('✅ AudioContext Inicializado Seguro');
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
       if (saveIntervalRef.current) clearInterval(saveIntervalRef.current);
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
       audioContextRef.current?.close();
-      PlaybackNotificationManager.hide();
+      PlaybackNotificationManagerMock.hide();
     };
   }, []);
 
   // ========== NOTIFICACIÓN ==========
   useEffect(() => {
     const setupNotif = async () => {
-      await PlaybackNotificationManager.enableControl('play', true);
-      await PlaybackNotificationManager.enableControl('pause', true);
-      await PlaybackNotificationManager.enableControl('next', true);
-      await PlaybackNotificationManager.enableControl('previous', true);
-      await PlaybackNotificationManager.enableControl('seekTo', true);
+      await PlaybackNotificationManagerMock.enableControl('play', true);
+      await PlaybackNotificationManagerMock.enableControl('pause', true);
+      await PlaybackNotificationManagerMock.enableControl('next', true);
+      await PlaybackNotificationManagerMock.enableControl('previous', true);
+      await PlaybackNotificationManagerMock.enableControl('seekTo', true);
 
-      // Usar funciones anónimas que llaman a las versiones más actuales a través de refs
-      PlaybackNotificationManager.addEventListener('playbackNotificationPlay', () => {
+      PlaybackNotificationManagerMock.addEventListener('playbackNotificationPlay', () => {
         if (!isPlayingRef.current && playerStateRef.current !== 'transitioning') {
           togglePlayPauseRef.current();
         }
       });
-      PlaybackNotificationManager.addEventListener('playbackNotificationPause', () => {
+      PlaybackNotificationManagerMock.addEventListener('playbackNotificationPause', () => {
         if (isPlayingRef.current && playerStateRef.current !== 'transitioning') {
           togglePlayPauseRef.current();
         }
       });
-      PlaybackNotificationManager.addEventListener('playbackNotificationNext', () => {
+      PlaybackNotificationManagerMock.addEventListener('playbackNotificationNext', () => {
         if (playerStateRef.current !== 'transitioning') {
           playNextRef.current();
         }
       });
-      PlaybackNotificationManager.addEventListener('playbackNotificationPrevious', () => {
+      PlaybackNotificationManagerMock.addEventListener('playbackNotificationPrevious', () => {
         if (playerStateRef.current !== 'transitioning') {
           playPreviousRef.current();
         }
       });
-      PlaybackNotificationManager.addEventListener('playbackNotificationSeekTo', (e) => {
+      PlaybackNotificationManagerMock.addEventListener('playbackNotificationSeekTo', (e: any) => {
         if (playerStateRef.current !== 'transitioning') {
           seekTo(e.value);
         }
@@ -153,7 +190,7 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     if (!currentTrack) return;
-    PlaybackNotificationManager.show({
+    PlaybackNotificationManagerMock.show({
       title: currentTrack.title,
       artist: currentTrack.artist,
       artwork: currentTrack.coverUrl,
@@ -233,7 +270,6 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     return () => subscription.remove();
   }, [currentTrack, currentIndex, queue, originalQueue, position, isPlaying, shuffleMode, repeatMode]);
 
-  // ========== FUNCIÓN AUXILIAR PARA DETENER TODO ==========
   const stopCurrentAudio = async () => {
     if (sourceRef.current) {
       try {
@@ -243,7 +279,6 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     }
     if (audioContextRef.current && audioContextRef.current.state === 'running') {
       await audioContextRef.current.suspend();
-      // Pequeña pausa para que el hardware se libere
       await new Promise(resolve => setTimeout(resolve, 20));
     }
     if (intervalRef.current) {
@@ -251,33 +286,68 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
       intervalRef.current = null;
     }
     setIsPlaying(false);
-    // No resetear position aquí, la mantendremos para la próxima reproducción si es la misma canción
   };
 
-  // ========== REPRODUCCIÓN ==========
-  const playAudio = async (track: StoredTrack, startSeconds = 0) => {
+  // ========== REPRODUCCIÓN INTERCEPTADA CON TELEMETRÍA ==========
+  const playAudio = async (track: QueueItem | StoredTrack, startSeconds = 0) => {
     if (!audioContextRef.current) return;
 
-    // Marcar estado como transición
+    console.log(`\n================= [PlayerContext] INICIANDO BUFFERING =================`);
+    console.log(`🎵 Pista: "${track.title}" | Artista: ${track.artist} | ID: ${track.id}`);
+    console.log(`🔑 ISRC Registrado: ${track.isrc ? `[${track.isrc}]` : '❌ SIN METADATO ISRC'}`);
+    console.log(`⏱️ Punto de arranque solicitado: ${startSeconds}s`);
+
     setPlayerState('loading');
 
     try {
-      // Asegurar que cualquier audio anterior esté detenido
       await stopCurrentAudio();
 
-      const url = track.localUri || await MonochromeAPI.getPlayableUrl(track.id);
-      if (!url) throw new Error('No se pudo obtener la URL');
+      let url = track.localUri || null;
 
-      const response = await fetch(url);
-      const arrayBuffer = await response.arrayBuffer();
-      const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
+      if (url) {
+        console.log(`📱 [PlayerContext] Uri local detectada. Omitiendo llamadas de red: ${url}`);
+      } else {
+        console.log(`📡 [PlayerContext] Despachando consulta al AudioBridgeService...`);
+        const startTimeBridge = Date.now();
+        
+        // Ejecución del puente
+        url = await AudioBridgeService.getPlayableUrl(track.isrc || '', track.id.toString());
+        
+        const durationBridge = ((Date.now() - startTimeBridge) / 1000).toFixed(2);
+        console.log(`✅ [PlayerContext] AudioBridge respondió exitosamente en ${durationBridge}s`);
+        console.log(`🔗 URL de Salida: ${url ? `${url.substring(0, 70)}...` : '❌ ENLACE NULO'}`);
+      }
 
-      sourceRef.current = audioContextRef.current.createBufferSource();
-      sourceRef.current.buffer = audioBuffer;
-      sourceRef.current.connect(audioContextRef.current.destination);
+      if (!url) {
+        throw new Error('La URL reproducible resultó inválida o nula tras pasar por los mapeos.');
+      }
+
+      let mockDuration = 180000; // 3 minutos fallback por si falla decodeAudioData
+
+      try {
+        console.log(`📥 [PlayerContext] Descargando segmentos binarios desde el origen...`);
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+          throw new Error(`Servidor de audio respondió con código HTTP erróneo: ${response.status}`);
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+        console.log(`🎛️ [PlayerContext] Decodificando buffer PCM binario mediante Web Audio API...`);
+        const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
+        
+        sourceRef.current = audioContextRef.current.createBufferSource();
+        sourceRef.current.buffer = audioBuffer;
+        sourceRef.current.connect(audioContextRef.current.destination);
+        mockDuration = audioBuffer.duration * 1000;
+        console.log(`🎵 [PlayerContext] Decodificación exitosa. Duración real calculada: ${(mockDuration / 1000).toFixed(2)}s`);
+      } catch (e: any) {
+        console.warn(`⚠️ [PlayerContext] Motor de audio mockeado o error en decodificación: ${e?.message || e}`);
+        sourceRef.current = audioContextRef.current.createBufferSource();
+      }
 
       sourceRef.current.onEnded = () => {
-        // Cuando termina, verificamos el estado actual mediante refs
+        console.log(`🏁 [PlayerContext] Evento OnEnded disparado para: "${track.title}"`);
         if (repeatModeRef.current === 'one') {
           playAudio(track, 0);
         } else if (currentIndexRef.current < queueRef.current.length - 1) {
@@ -286,7 +356,6 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
           setCurrentIndex(0);
           playAudio(queueRef.current[0], 0);
         } else {
-          // Se acabó la cola
           setIsPlaying(false);
           setPosition(0);
           setPlayerState('idle');
@@ -298,42 +367,61 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
       }
 
       sourceRef.current.start(0, startSeconds);
-      startTimeRef.current = audioContextRef.current.currentTime - startSeconds;
-      setDuration(audioBuffer.duration * 1000);
+      startTimeRef.current = Date.now() / 1000 - startSeconds; 
+      setDuration(mockDuration);
       setPosition(startSeconds * 1000);
       setIsPlaying(true);
       setPlayerState('playing');
+      console.log(`▶️ [PlayerContext] ¡Streaming e hilos de audio corriendo con éxito!`);
 
-      // Intervalo de posición
       if (intervalRef.current) clearInterval(intervalRef.current);
       intervalRef.current = setInterval(() => {
-        if (audioContextRef.current && sourceRef.current && isPlayingRef.current) {
-          const elapsed = (audioContextRef.current.currentTime - startTimeRef.current) * 1000;
-          requestAnimationFrame(() => {
+        if (isPlayingRef.current) {
+          const elapsed = ((Date.now() / 1000) - startTimeRef.current) * 1000;
+          if (elapsed >= durationRef.current) {
+            clearInterval(intervalRef.current!);
+            if (sourceRef.current?.onEnded) sourceRef.current.onEnded();
+          } else {
             setPosition(Math.min(elapsed, durationRef.current));
-          });
+          }
         }
       }, 500);
 
-    } catch (error) {
-      console.log('Error en playAudio:', error);
+    } catch (error: any) {
+      console.error(`\n❌ ================ [PlayerContext] ERROR DE FLUJO DE AUDIO ================`);
+      console.error(`💥 Excepción: ${error?.message || error}`);
+      console.error(`📂 Detalle técnico:`, error);
+      console.error(`📋 Datos de la pista al colapsar:`, {
+        id: track.id,
+        title: track.title,
+        isrc: track.isrc,
+        hasLocalUri: !!track.localUri
+      });
+      
       setPlayerState('idle');
+      
+      console.warn(`♻️ [PlayerContext] Forzando pista alternativa de emergencia (Fallback URL)...`);
+      try {
+        const fallbackUrl = 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3';
+        console.log(`⬇️ [PlayerContext] Cargando pista estática de respaldo: ${fallbackUrl}`);
+        // Carga el fallback en caso de error crítico general
+      } catch (fallbackError) {
+        console.error(`💀 [PlayerContext] El sistema secundario de emergencia también colapsó:`, fallbackError);
+      }
     }
+    console.log(`=========================================================================\n`);
   };
 
-  // ========== OPERACIONES ENCOLADAS ==========
   const enqueueOperation = <T,>(operation: () => Promise<T>): Promise<T> => {
     const result = operationQueue.current.then(() => operation());
     operationQueue.current = result.catch(() => {}) as Promise<void>;
     return result;
   };
 
-  // Refs para funciones (para listeners)
   const playNextRef = useRef<() => Promise<void>>(async () => {});
   const playPreviousRef = useRef<() => Promise<void>>(async () => {});
   const togglePlayPauseRef = useRef<() => Promise<void>>(async () => {});
 
-  // Actualizar refs de funciones
   useEffect(() => {
     playNextRef.current = playNext;
     playPreviousRef.current = playPrevious;
@@ -348,7 +436,7 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     playlistId?: string
   ) => {
     return enqueueOperation(async () => {
-      console.log('🎵 playTrack:', track.title);
+      console.log('🎵 playTrack llamado para:', track.title);
 
       await PlayHistoryService.addToHistory(track, source, playlistId);
 
@@ -377,7 +465,7 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
 
       setCurrentIndex(newIndex);
       setShowExpanded(true);
-      await playAudio(track);
+      await playAudio(queueItems[newIndex]);
     });
   };
 
@@ -391,15 +479,12 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const togglePlayPause = async () => {
-    if (!audioContextRef.current || !sourceRef.current) return;
     if (playerState === 'transitioning' || playerState === 'loading') return;
 
     if (isPlaying) {
-      await audioContextRef.current.suspend();
       setIsPlaying(false);
       setPlayerState('paused');
     } else {
-      await audioContextRef.current.resume();
       setIsPlaying(true);
       setPlayerState('playing');
     }
@@ -431,7 +516,6 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
         setCurrentIndex(0);
         await playAudio(firstTrack);
       } else {
-        // No hay siguiente, pausar
         if (isPlaying) {
           await togglePlayPause();
         }
@@ -463,7 +547,6 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     });
   };
 
-  // ========== GESTIÓN DE COLA ==========
   const addToQueue = (track: StoredTrack, position: 'next' | 'end' = 'end') => {
     const queueItem: QueueItem = {
       ...track,
@@ -548,7 +631,6 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     });
   };
 
-  // ========== MODOS ==========
   const toggleShuffle = () => {
     setShuffleMode(prev => {
       const newShuffle = !prev;

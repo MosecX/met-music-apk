@@ -9,6 +9,7 @@ export interface Track {
   duration: number;
   explicit?: boolean;
   quality?: string;
+  isrc?: string | null; // 👈 Agregado aquí en la raíz. Así todas las interfaces heredan este metadato nativo.
 }
 
 export interface StoredTrack extends Track {
@@ -16,11 +17,12 @@ export interface StoredTrack extends Track {
   downloadedAt?: number;
   fileSize?: number;
   streamUrl?: string;
+  // 💡 Ya no hace falta duplicarlo aquí, lo hereda automáticamente de Track de forma limpia
 }
 
 export interface QueueItem extends StoredTrack {
-  queueId: string; // Identificador único para la cola
-  source?: 'search' | 'playlist' | 'recommendations' | 'downloads'; // De dónde viene
+  queueId: string; // Identificador único para la instancia en la cola
+  source?: 'search' | 'playlist' | 'recommendations' | 'downloads'; // Origen de la pista
   playlistId?: string; // Si viene de una playlist, su ID
 }
 

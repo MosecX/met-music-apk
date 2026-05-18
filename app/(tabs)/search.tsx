@@ -2,20 +2,20 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Animated,
   Dimensions,
-  FlatList,
   Keyboard,
-  RefreshControl,
   StyleSheet,
   Text,
   TextInput,
+  TextStyle,
   TouchableOpacity,
   View,
+  ViewStyle
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AddToPlaylistModal from '../../components/AddToPlaylistModal';
@@ -25,7 +25,7 @@ import MonochromeAPI from '../../services/MonochromeAPI';
 import storageService from '../../services/storage';
 import { StoredTrack, Track as TrackType } from '../../types';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 const OFFLINE_MODE_KEY = '@offline_mode';
 const TAB_BAR_HEIGHT = 60;
 const PLAYER_HEIGHT = 80;
@@ -36,39 +36,46 @@ export default function SearchScreen() {
   const [results, setResults] = useState<TrackType[]>([]);
   const [filteredResults, setFilteredResults] = useState<TrackType[]>([]);
   const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const [searched, setSearched] = useState(false);
   const [selectedTrackForPlaylist, setSelectedTrackForPlaylist] = useState<TrackType | null>(null);
   const [showPlaylistModal, setShowPlaylistModal] = useState(false);
   const [offlineMode, setOfflineMode] = useState(false);
   const [downloadedTracks, setDownloadedTracks] = useState<StoredTrack[]>([]);
   
-  // Animaciones
+  // 🎇 Animaciones de Orbes Líquidos y Contenido
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(0.95)).current;
+  const orb1Y = useRef(new Animated.Value(0)).current;
+  const orb2X = useRef(new Animated.Value(0)).current;
+  const scrollY = useRef(new Animated.Value(0)).current;
   
-  const { currentTrack, playTrack } = usePlayer();
-
+  const { currentTrack, playTrack, isPlaying } = usePlayer();
   const playerOffset = currentTrack ? PLAYER_HEIGHT : 0;
 
   useEffect(() => {
     loadSettings();
     loadDownloads();
     
-    // Animación de entrada
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 800,
-        useNativeDriver: true,
-      }),
-      Animated.spring(scaleAnim, {
-        toValue: 1,
-        friction: 8,
-        tension: 40,
-        useNativeDriver: true,
-      }),
-    ]).start();
+    // Animación de entrada de la UI
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 600,
+      useNativeDriver: true,
+    }).start();
+
+    // Loop infinito de fluidos en el fondo para dar vida al cristal
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(orb1Y, { toValue: 40, duration: 6000, useNativeDriver: true }),
+        Animated.timing(orb1Y, { toValue: 0, duration: 6000, useNativeDriver: true }),
+      ])
+    ).start();
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(orb2X, { toValue: -30, duration: 5000, useNativeDriver: true }),
+        Animated.timing(orb2X, { toValue: 0, duration: 5000, useNativeDriver: true }),
+      ])
+    ).start();
   }, []);
 
   useEffect(() => {
@@ -94,33 +101,8 @@ export default function SearchScreen() {
     setDownloadedTracks(tracks);
   };
 
-  // Función para recargar la búsqueda actual
-  const refreshSearch = useCallback(async () => {
-    if (!query.trim() || results.length === 0) return;
-    
-    setRefreshing(true);
-    
-    try {
-      console.log('🔄 Recargando búsqueda:', query);
-      const tracks = await MonochromeAPI.searchTracks(query);
-      setResults(tracks);
-      
-      if (offlineMode) {
-        const downloadedIds = downloadedTracks.map(t => t.id);
-        setFilteredResults(tracks.filter(t => downloadedIds.includes(t.id)));
-      } else {
-        setFilteredResults(tracks);
-      }
-    } catch (err) {
-      console.error('Error al recargar', err);
-    } finally {
-      setRefreshing(false);
-    }
-  }, [query, offlineMode, downloadedTracks]);
-
   const handleSearch = async () => {
     if (!query.trim()) return;
-    
     setLoading(true);
     setSearched(true);
     Keyboard.dismiss();
@@ -128,17 +110,9 @@ export default function SearchScreen() {
     try {
       const tracks = await MonochromeAPI.searchTracks(query);
       setResults(tracks);
-      
-      if (offlineMode) {
-        const downloadedIds = downloadedTracks.map(t => t.id);
-        setFilteredResults(tracks.filter(t => downloadedIds.includes(t.id)));
-      } else {
-        setFilteredResults(tracks);
-      }
     } catch (err) {
-      console.error('Error al buscar', err);
+      console.error(err);
       setResults([]);
-      setFilteredResults([]);
     } finally {
       setLoading(false);
     }
@@ -155,257 +129,211 @@ export default function SearchScreen() {
   const handleTrackPress = (index: number) => {
     const track = filteredResults[index];
     if (track) {
-      if (offlineMode) {
-        const isDownloaded = downloadedTracks.some(t => t.id === track.id);
-        if (!isDownloaded) {
-          Alert.alert('📱 Modo Offline', 'Esta canción no está disponible sin conexión. Descárgala primero.');
-          return;
-        }
+      if (offlineMode && !downloadedTracks.some(t => t.id === track.id)) {
+        Alert.alert('📱 Modo Offline', 'Descarga la canción primero.');
+        return;
       }
-      
-      playTrack(
-        track,
-        filteredResults,
-        index,
-        'search'
-      );
-    }
-  };
 
-  const handleAddToPlaylist = (track: TrackType) => {
-    setSelectedTrackForPlaylist(track);
-    setShowPlaylistModal(true);
+      // Mapeamos el array completo para inyectar un casteo limpio por si TypeScript se queja del isrc en local
+      const trackQueue = filteredResults.map(t => ({
+        ...t,
+        isrc: (t as any).isrc || null // Nos aseguramos de propagar el ISRC de Monochrome al contexto
+      }));
+
+      playTrack(trackQueue[index] as any, trackQueue as any, index, 'search');
+    }
   };
 
   const handleDownload = async (trackId: number) => {
     try {
-      const track = results.find(t => t.id === trackId);
-      if (!track) return;
+      const trackToDownload = filteredResults.find(t => t.id === trackId);
       
-      const url = await MonochromeAPI.getPlayableUrl(trackId);
-      await storageService.addDownloadedTrack(track as StoredTrack, url);
-      await loadDownloads();
+      if (!trackToDownload) {
+        Alert.alert('❌ Error', 'No se encontró la información de la canción.');
+        return;
+      }
+
+      const audioUrl = await MonochromeAPI.getPlayableUrl(trackToDownload.id);
       
-      if (offlineMode) {
-        const downloadedIds = [...downloadedTracks.map(t => t.id), trackId];
-        setFilteredResults(results.filter(t => downloadedIds.includes(t.id)));
+      const trackMetadata: StoredTrack = {
+        ...trackToDownload,
+        localUri: '',
+        downloadedAt: Date.now(),
+        isrc: (trackToDownload as any).isrc || null // Guardamos también el metadato ISRC en local
+      };
+
+      const success = await storageService.addDownloadedTrack(trackMetadata, audioUrl);
+      
+      if (success) {
+        Alert.alert('📥 Descarga Exitosa', `"${trackToDownload.title}" se guardó en alta resolución.`);
+        await loadDownloads();
+      } else {
+        Alert.alert('❌ Error', 'Ocurrió un problema guardando el archivo de audio.');
       }
     } catch (error) {
-      throw error;
+      console.error('Error al descargar track:', error);
+      Alert.alert('❌ Error', 'No se pudo obtener el enlace de descarga.');
     }
   };
 
-  const trendingSearches = [
-    'Lo más nuevo',
-    'Éxitos 2024',
-    'En Vivo',
-    'Remixes',
-    'Acústico',
-    'Rock Latino',
-    'Reggaetón',
-    'Pop',
-  ];
+  const searchHeaderHeight = insets.top + 75;
+  const headerTranslateY = scrollY.interpolate({
+    inputRange: [0, 60],
+    outputRange: [0, -10],
+    extrapolate: 'clamp',
+  });
+
+  const trendingSearches = ['Lo más nuevo', 'Éxitos 2024', 'En Vivo', 'Remixes', 'Acústico', 'Reggaetón'];
+
+  const featuredTrack = filteredResults[0];
+  const remainingTracks = filteredResults.slice(1);
 
   return (
     <View style={styles.container}>
-      <LinearGradient
-        colors={['#0A0A0A', '#1A1A1A', '#0F0F0F']}
-        locations={[0, 0.5, 1]}
-        style={StyleSheet.absoluteFill}
-      />
+      {/* Fondo de Profundidad Absoluta */}
+      <View style={styles.absoluteDark} />
       
-      {/* Elementos decorativos */}
-      <View style={styles.decorativeCircle1} />
-      <View style={styles.decorativeCircle2} />
+      {/* 🔮 Orbes de Luz Líquida con Movimiento Orgánico */}
+      <Animated.View style={[styles.liquidOrbGreen, { transform: [{ translateY: orb1Y }] }] as ViewStyle[]} />
+      <Animated.View style={[styles.liquidOrbWhite, { transform: [{ translateX: orb2X }] }] as ViewStyle[]} />
 
-      <FlatList
-        data={filteredResults}
+      {/* 🛠️ CAPA 1: Dock de Búsqueda Flotante de Cristal Superior */}
+      <Animated.View style={[styles.floatingHeaderContainer, { transform: [{ translateY: headerTranslateY }] }] as ViewStyle[]}>
+        <BlurView intensity={70} tint="dark" style={[styles.glassDock, { paddingTop: insets.top + 8 }] as ViewStyle[]}>
+          <View style={styles.searchRow}>
+            <View style={styles.inputWrapper}>
+              <Ionicons name="search" size={16} color="rgba(255,255,255,0.3)" style={styles.searchIcon as TextStyle} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder={offlineMode ? "Buscar descargas..." : "Artistas, álbumes, canciones..."}
+                placeholderTextColor="rgba(255,255,255,0.2)"
+                value={query}
+                onChangeText={setQuery}
+                onSubmitEditing={handleSearch}
+                returnKeyType="search"
+                selectionColor="#1DB954"
+              />
+              {query.length > 0 && (
+                <TouchableOpacity onPress={clearSearch} style={styles.iconButton}>
+                  <Ionicons name="close-circle-outline" size={16} color="rgba(255,255,255,0.4)" />
+                </TouchableOpacity>
+              )}
+            </View>
+            
+            {offlineMode && (
+              <View style={styles.offlineIndicator}>
+                <View style={styles.pulseDot} />
+              </View>
+            )}
+          </View>
+        </BlurView>
+      </Animated.View>
+
+      {/* 🛠️ CAPA 2: Lista Editorial Asimétrica con Scroll */}
+      <Animated.FlatList
+        data={remainingTracks}
         keyExtractor={(item) => item.id.toString()}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+          { useNativeDriver: true }
+        )}
+        scrollEventThrottle={16}
         renderItem={({ item, index }) => (
-          <Animated.View
-            style={{
-              opacity: fadeAnim,
-              transform: [{ scale: scaleAnim }],
-            }}
-          >
+          <Animated.View style={{ opacity: fadeAnim } as ViewStyle}>
             <TrackItem
               track={item}
-              index={index}
+              index={index + 1}
               isActive={currentTrack?.id === item.id}
-              onPlay={handleTrackPress}
-              onAddToPlaylist={handleAddToPlaylist}
+              onPlay={() => handleTrackPress(index + 1)} // Corregido para reproducir el índice real mapeado
+              onAddToPlaylist={(t) => { setSelectedTrackForPlaylist(t); setShowPlaylistModal(true); }}
               onDownload={handleDownload}
               showDownload={true}
               showFavorite={true}
             />
           </Animated.View>
         )}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={refreshSearch}
-            tintColor="#1DB954"
-            colors={['#1DB954']}
-            progressBackgroundColor="#1A1A1A"
-          />
-        }
+        contentContainerStyle={[
+          styles.scrollContainer,
+          { paddingTop: searchHeaderHeight + 20, paddingBottom: TAB_BAR_HEIGHT + playerOffset + insets.bottom + 20 }
+        ] as ViewStyle[]}
         ListHeaderComponent={
-          <Animated.View style={{ opacity: fadeAnim }}>
-            <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
-              <LinearGradient
-                colors={['rgba(29,185,84,0.2)', 'rgba(29,185,84,0.1)']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.heroGradient}
-              >
-                <View style={styles.hero}>
-                  <Text style={styles.heroBadge}>🎵 DESCUBRE</Text>
-                  <Text style={styles.heroTitle}>Buscar</Text>
-                  <Text style={styles.heroSubtitle}>
-                    Encuentra tus canciones
-                  </Text>
-                  {offlineMode && (
-                    <BlurView intensity={40} tint="dark" style={styles.offlineBadge}>
-                      <Ionicons name="cloud-outline" size={14} color="#1DB954" />
-                      <Text style={styles.offlineBadgeText}>Modo offline</Text>
-                    </BlurView>
-                  )}
-                </View>
-              </LinearGradient>
-
-              <View style={styles.searchWrapper}>
-                <BlurView intensity={80} tint="dark" style={styles.searchContainer}>
-                  <View style={styles.searchContent}>
-                    <Ionicons name="search" size={18} color="#1DB954" />
-                    <TextInput
-                      style={styles.searchInput}
-                      placeholder={offlineMode ? "Buscar en descargas..." : "Buscar canciones..."}
-                      placeholderTextColor="rgba(255,255,255,0.3)"
-                      value={query}
-                      onChangeText={setQuery}
-                      onSubmitEditing={handleSearch}
-                      returnKeyType="search"
-                      selectionColor="#1DB954"
-                    />
-                    {query.length > 0 && (
-                      <TouchableOpacity onPress={clearSearch}>
-                        <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.5)" />
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                </BlurView>
+          <Animated.View style={{ opacity: fadeAnim } as ViewStyle}>
+            {!searched && !loading && (
+              <View style={styles.editorialIntro}>
+                <Text style={styles.editorialSubtitle}>EXPLORA EL SONIDO</Text>
+                <Text style={styles.editorialTitle}>Descubrir</Text>
                 
-                <TouchableOpacity
-                  style={[
-                    styles.searchButton,
-                    (!query.trim() || loading) && styles.searchButtonDisabled
-                  ]}
-                  onPress={handleSearch}
-                  disabled={!query.trim() || loading}
-                  activeOpacity={0.8}
-                >
-                  <LinearGradient
-                    colors={['#1DB954', '#1a7a3a']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.searchButtonGradient}
-                  >
-                    {loading ? (
-                      <ActivityIndicator color="#FFF" size="small" />
-                    ) : (
-                      <>
-                        <Text style={styles.searchButtonText}>Ir</Text>
-                      </>
-                    )}
-                  </LinearGradient>
-                </TouchableOpacity>
-              </View>
-
-              {!searched && !loading && (
-                <View style={styles.trendingSection}>
-                  <View style={styles.trendingHeader}>
-                    <Ionicons name="trending-up" size={18} color="#1DB954" />
-                    <Text style={styles.trendingTitle}>Tendencias</Text>
-                  </View>
-                  <View style={styles.trendingChips}>
-                    {trendingSearches.map((item, index) => (
-                      <TouchableOpacity
-                        key={index}
-                        style={styles.trendingChip}
-                        onPress={() => {
-                          setQuery(item);
-                          handleSearch();
-                        }}
+                <View style={styles.trendingGrid}>
+                  {trendingSearches.map((item, index) => (
+                    <TouchableOpacity
+                      key={index}
+                      style={styles.editorialCardChip}
+                      onPress={() => {
+                        setQuery(item);
+                        setTimeout(() => handleSearch(), 50);
+                      }}
+                    >
+                      <LinearGradient
+                        colors={['rgba(255,255,255,0.03)', 'rgba(255,255,255,0.005)']}
+                        style={styles.chipGradient}
                       >
-                        <Text style={styles.trendingChipText}>{item}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
+                        <Text style={styles.chipText}>{item}</Text>
+                        <Ionicons name="arrow-forward-circle-outline" size={14} color="rgba(255,255,255,0.2)" />
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  ))}
                 </View>
-              )}
+              </View>
+            )}
 
-              {offlineMode && filteredResults.length === 0 && searched && !loading && (
-                <BlurView intensity={40} tint="dark" style={styles.offlineInfo}>
-                  <Ionicons name="information-circle" size={20} color="#1DB954" />
-                  <Text style={styles.offlineInfoText}>
-                    No hay canciones descargadas que coincidan con "{query}"
-                  </Text>
-                </BlurView>
-              )}
-            </View>
+            {/* 🌟 TARJETA ASIMÉTRICA DESTACADA (BEST MATCH) */}
+            {searched && featuredTrack && (
+              <View style={styles.featuredSection}>
+                <Text style={styles.sectionLabel}>Resultado principal</Text>
+                <TouchableOpacity 
+                  activeOpacity={0.9} 
+                  onPress={() => handleTrackPress(0)}
+                  style={styles.featuredGlassContainer}
+                >
+                  <BlurView intensity={25} tint="light" style={styles.featuredGlassCard as ViewStyle}>
+                    <View style={styles.featuredDetails}>
+                      <View style={styles.featuredMeta}>
+                        <Text style={styles.featuredTrackName} numberOfLines={1}>{featuredTrack.title}</Text>
+                        <Text style={styles.featuredArtistName} numberOfLines={1}>{featuredTrack.artist}</Text>
+                      </View>
+                      <View style={styles.playFabContainer}>
+                        <LinearGradient colors={['#1DB954', '#147a35']} style={styles.playFab}>
+                          <Ionicons name={currentTrack?.id === featuredTrack.id && isPlaying ? "pause" : "play"} size={20} color="#FFF" />
+                        </LinearGradient>
+                      </View>
+                    </View>
+                  </BlurView>
+                </TouchableOpacity>
+                {remainingTracks.length > 0 && <Text style={styles.sectionLabelNext}>Siguientes resultados</Text>}
+              </View>
+            )}
+
+            {loading && (
+              <View style={styles.loaderContainer}>
+                <ActivityIndicator size="small" color="#1DB954" />
+              </View>
+            )}
           </Animated.View>
         }
         ListEmptyComponent={
-          searched && !loading ? (
-            <Animated.View style={[styles.emptyContainer, { opacity: fadeAnim }]}>
-              <BlurView intensity={30} tint="dark" style={styles.emptyCard}>
-                <LinearGradient
-                  colors={['rgba(29,185,84,0.2)', 'rgba(29,185,84,0.05)']}
-                  style={styles.emptyGradient}
-                >
-                  <Ionicons 
-                    name={offlineMode ? "cloud-offline-outline" : "search-outline"} 
-                    size={60} 
-                    color="rgba(255,255,255,0.2)" 
-                  />
-                  <Text style={styles.emptyTitle}>
-                    {offlineMode ? 'Sin resultados' : 'No encontramos nada'}
-                  </Text>
-                  <Text style={styles.emptyText}>
-                    {offlineMode 
-                      ? `"${query}" no está en tus descargas`
-                      : 'Prueba con otras palabras'}
-                  </Text>
-                </LinearGradient>
-              </BlurView>
-            </Animated.View>
+          searched && !loading && filteredResults.length === 0 ? (
+            <BlurView intensity={10} tint="dark" style={styles.emptyEditorialBox as ViewStyle}>
+              <Text style={styles.emptyEditorialTitle}>Vacío absoluto</Text>
+              <Text style={styles.emptyEditorialText}>No hay registros locales ni remotos para tu criterio.</Text>
+            </BlurView>
           ) : null
         }
-        contentContainerStyle={[
-          styles.listContent,
-          {
-            paddingBottom: TAB_BAR_HEIGHT + playerOffset + insets.bottom + 20,
-          }
-        ]}
         showsVerticalScrollIndicator={false}
-        initialNumToRender={10}
-        maxToRenderPerBatch={10}
-        windowSize={5}
-        removeClippedSubviews={true}
-        ListFooterComponent={loading ? (
-          <BlurView intensity={40} tint="dark" style={styles.loadingFooter}>
-            <ActivityIndicator size="large" color="#1DB954" />
-            <Text style={styles.loadingText}>Buscando...</Text>
-          </BlurView>
-        ) : null}
       />
 
       <AddToPlaylistModal
         visible={showPlaylistModal}
-        onClose={() => {
-          setShowPlaylistModal(false);
-          setSelectedTrackForPlaylist(null);
-        }}
+        onClose={() => { setShowPlaylistModal(false); setSelectedTrackForPlaylist(null); }}
         track={selectedTrackForPlaylist as StoredTrack | null}
         onAdded={() => {}}
       />
@@ -416,225 +344,225 @@ export default function SearchScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0A0A0A',
+    backgroundColor: '#020202',
   },
-  decorativeCircle1: {
+  absoluteDark: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#030303',
+  },
+  liquidOrbGreen: {
     position: 'absolute',
-    width: 200,
-    height: 200,
-    borderRadius: 100,
+    width: width * 0.9,
+    height: width * 0.9,
+    borderRadius: (width * 0.9) / 2,
     backgroundColor: 'rgba(29,185,84,0.05)',
-    top: -50,
-    right: -50,
+    top: -80,
+    right: -40,
   },
-  decorativeCircle2: {
+  liquidOrbWhite: {
     position: 'absolute',
-    width: 150,
-    height: 150,
-    borderRadius: 75,
-    backgroundColor: 'rgba(29,185,84,0.03)',
-    bottom: -30,
-    left: -30,
+    width: width * 0.5,
+    height: width * 0.5,
+    borderRadius: (width * 0.5) / 2,
+    backgroundColor: 'rgba(255,255,255,0.012)',
+    top: height * 0.4,
+    left: -50,
   },
-  header: {
-    paddingBottom: 20,
+  floatingHeaderContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
   },
-  heroGradient: {
-    marginHorizontal: 16,
-    marginBottom: 20,
-    borderRadius: 25,
-    overflow: 'hidden',
-  },
-  hero: {
-    padding: 20,
-    alignItems: 'center',
-  },
-  heroBadge: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 1.5,
-    marginBottom: 8,
-  },
-  heroTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#FFF',
-    textAlign: 'center',
-    marginBottom: 4,
-    textShadowColor: 'rgba(29,185,84,0.3)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 8,
-  },
-  heroSubtitle: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.5)',
-    textAlign: 'center',
-    lineHeight: 18,
-  },
-  offlineBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 25,
-    gap: 6,
-    marginTop: 12,
-    backgroundColor: 'rgba(29,185,84,0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(29,185,84,0.3)',
-  },
-  offlineBadgeText: {
-    color: '#FFF',
-    fontSize: 11,
-    fontWeight: '500',
-  },
-  searchWrapper: {
-    flexDirection: 'row',
+  glassDock: {
+    borderBottomWidth: 1,
+    borderColor: 'rgba(255,255,255,0.04)',
+    paddingBottom: 12,
     paddingHorizontal: 16,
-    marginBottom: 20,
-    gap: 8,
+    backgroundColor: 'rgba(6,6,6,0.3)',
   },
-  searchContainer: {
-    flex: 1,
-    borderRadius: 22,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  searchContent: {
+  searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    gap: 8,
+    gap: 10,
+  },
+  inputWrapper: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 12,
+  },
+  searchIcon: {
+    marginRight: 8,
   },
   searchInput: {
     flex: 1,
     color: '#FFF',
     fontSize: 14,
-    padding: 0,
-    fontWeight: '400',
+    fontWeight: '300',
   },
-  searchButton: {
-    borderRadius: 22,
-    overflow: 'hidden',
-    shadowColor: '#1DB954',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 6,
+  iconButton: {
+    padding: 4,
   },
-  searchButtonDisabled: {
-    opacity: 0.5,
-  },
-  searchButtonGradient: {
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    alignItems: 'center',
+  offlineIndicator: {
     justifyContent: 'center',
-    minWidth: 60,
-  },
-  searchButtonText: {
-    color: '#FFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  trendingSection: {
-    paddingHorizontal: 16,
-    marginBottom: 20,
-  },
-  trendingHeader: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginBottom: 10,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(29,185,84,0.1)',
   },
-  trendingTitle: {
-    fontSize: 14,
-    fontWeight: '600',
+  pulseDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#1DB954',
+  },
+  scrollContainer: {
+    paddingHorizontal: 0,
+  },
+  editorialIntro: {
+    paddingHorizontal: 24,
+    marginTop: 15,
+  },
+  editorialSubtitle: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.3)',
+    letterSpacing: 2,
+    marginBottom: 4,
+  },
+  editorialTitle: {
+    fontSize: 36,
+    fontWeight: '800',
     color: '#FFF',
+    letterSpacing: -1,
+    marginBottom: 24,
   },
-  trendingChips: {
+  trendingGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
+    gap: 10,
   },
-  trendingChip: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+  editorialCardChip: {
+    width: (width - 58) / 2,
+    borderRadius: 16,
+    overflow: 'hidden',
   },
-  trendingChipText: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 12,
-    fontWeight: '400',
-  },
-  offlineInfo: {
-    marginHorizontal: 16,
-    padding: 12,
-    borderRadius: 18,
+  chipGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    backgroundColor: 'rgba(29,185,84,0.1)',
+    justifyContent: 'space-between',
+    padding: 16,
     borderWidth: 1,
-    borderColor: 'rgba(29,185,84,0.2)',
+    borderColor: 'rgba(255,255,255,0.04)',
+    gap: 8,
   },
-  offlineInfoText: {
+  chipText: {
     flex: 1,
-    color: '#FFF',
-    fontSize: 12,
-    lineHeight: 18,
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 13,
+    fontWeight: '400',
   },
-  emptyContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
+  featuredSection: {
     paddingHorizontal: 20,
+    marginBottom: 20,
   },
-  emptyCard: {
-    width: width * 0.85,
-    borderRadius: 25,
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.3)',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 12,
+  },
+  sectionLabelNext: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.3)',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginTop: 24,
+    marginBottom: 4,
+  },
+  featuredGlassContainer: {
+    borderRadius: 24,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: 'rgba(255,255,255,0.12)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 8,
   },
-  emptyGradient: {
+  featuredGlassCard: {
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    padding: 24,
+    height: 120,
+    justifyContent: 'flex-end',
+  },
+  featuredDetails: {
+    flexDirection: 'row',
     alignItems: 'center',
-    padding: 30,
+    justifyContent: 'space-between',
   },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+  featuredMeta: {
+    flex: 1,
+    marginRight: 16,
+  },
+  featuredTrackName: {
+    fontSize: 22,
+    fontWeight: '700',
     color: '#FFF',
-    marginTop: 16,
-    marginBottom: 6,
-    textAlign: 'center',
+    letterSpacing: -0.5,
+    marginBottom: 4,
   },
-  emptyText: {
-    fontSize: 12,
+  featuredArtistName: {
+    fontSize: 14,
     color: 'rgba(255,255,255,0.4)',
-    textAlign: 'center',
-    lineHeight: 18,
-  },
-  listContent: {
-    paddingHorizontal: 16,
-  },
-  loadingFooter: {
-    marginHorizontal: 16,
-    marginVertical: 16,
-    padding: 16,
-    borderRadius: 18,
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-  },
-  loadingText: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 12,
     fontWeight: '400',
+  },
+  playFabContainer: {
+    borderRadius: 25,
+    overflow: 'hidden',
+  },
+  playFab: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loaderContainer: {
+    padding: 30,
+    alignItems: 'center',
+  },
+  emptyEditorialBox: {
+    marginHorizontal: 24,
+    padding: 32,
+    borderRadius: 20,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.03)',
+    backgroundColor: 'rgba(255,255,255,0.005)',
+    marginTop: 40,
+  },
+  emptyEditorialTitle: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  emptyEditorialText: {
+    color: 'rgba(255,255,255,0.25)',
+    fontSize: 12,
+    textAlign: 'center',
   },
 });

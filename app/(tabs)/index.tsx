@@ -2,30 +2,75 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Dimensions,
-  FlatList,
   RefreshControl,
   StyleSheet,
   Text,
   View,
+  ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ScreenWrapper from '../../components/ScreenWrapper';
 import TrackItem from '../../components/TrackItem';
+
 import { usePlayer } from '../../context/PlayerContext';
 import MonochromeAPI from '../../services/MonochromeAPI';
 import PlayHistoryService from '../../services/PlayHistoryService';
 import storageService from '../../services/storage';
 import { StoredTrack } from '../../types';
 
-const { width } = Dimensions.get('window');
+// ✅ Corregido el crash: Extraídos 'width' y 'height' correctamente
+const { width, height } = Dimensions.get('window');
 const OFFLINE_MODE_KEY = '@offline_mode';
 const TAB_BAR_HEIGHT = 60;
 const PLAYER_HEIGHT = 80;
+
+// Componente optimizado para la animación en cascada de los items
+const AnimatedTrackItem = memo(({ item, index, isActive, onPlay }: { 
+  item: StoredTrack; 
+  index: number; 
+  isActive: boolean; 
+  onPlay: (idx: number) => void; 
+}) => {
+  const itemFade = useRef(new Animated.Value(0)).current;
+  const itemTranslateY = useRef(new Animated.Value(20)).current;
+
+  useEffect(() => {
+    // Animación escalonada basada en su posición (Stagger effect)
+    Animated.parallel([
+      Animated.timing(itemFade, {
+        toValue: 1,
+        duration: 400,
+        delay: Math.min(index * 40, 400),
+        useNativeDriver: true,
+      }),
+      Animated.timing(itemTranslateY, {
+        toValue: 0,
+        duration: 400,
+        delay: Math.min(index * 40, 400),
+        useNativeDriver: true,
+      })
+    ]).start();
+  }, [index]);
+
+  return (
+    <Animated.View style={{ opacity: itemFade, transform: [{ translateY: itemTranslateY }] } as ViewStyle}>
+      <TrackItem
+        track={item}
+        index={index}
+        isActive={isActive}
+        onPlay={onPlay}
+        showDownload={true}
+        showFavorite={true}
+      />
+    </Animated.View>
+  );
+});
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
@@ -36,13 +81,33 @@ export default function HomeScreen() {
   const [offlineMode, setOfflineMode] = useState(false);
   const [downloadedTracks, setDownloadedTracks] = useState<StoredTrack[]>([]);
   const [lastPlayedInfo, setLastPlayedInfo] = useState<string>('');
-  const { currentTrack, playTrack } = usePlayer();
+  
+  // 🔮 Animaciones e interpolaciones dinámicas
+  const orb1Y = useRef(new Animated.Value(0)).current;
+  const orb2X = useRef(new Animated.Value(0)).current;
+  const scrollY = useRef(new Animated.Value(0)).current;
 
+  const { currentTrack, playTrack } = usePlayer();
   const playerOffset = currentTrack ? PLAYER_HEIGHT : 0;
 
   useEffect(() => {
     loadSettings();
     loadDownloads();
+
+    // Bucles orgánicos infinitos para los fluidos del fondo
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(orb1Y, { toValue: 40, duration: 8000, useNativeDriver: true }),
+        Animated.timing(orb1Y, { toValue: 0, duration: 8000, useNativeDriver: true }),
+      ])
+    ).start();
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(orb2X, { toValue: -30, duration: 7000, useNativeDriver: true }),
+        Animated.timing(orb2X, { toValue: 0, duration: 7000, useNativeDriver: true }),
+      ])
+    ).start();
   }, []);
 
   useEffect(() => {
@@ -54,77 +119,40 @@ export default function HomeScreen() {
     }
   }, [offlineMode, downloadedTracks, recommendations]);
 
-  // Cargar recomendaciones basadas en el historial
   const loadRecommendations = useCallback(async () => {
     try {
       setLoading(true);
-      
-      console.log('🔍 CARGANDO RECOMENDACIONES');
-      console.log('🔍 Modo offline:', offlineMode);
-      
-      // DEBUG: Ver historial completo
-      const fullHistory = await PlayHistoryService.getHistory();
-      console.log('📊 HISTORIAL COMPLETO:', fullHistory.map(h => ({
-        cancion: h.track.title,
-        artista: h.track.artist,
-        cuando: new Date(h.playedAt).toLocaleTimeString()
-      })));
-      
-      // 1. Obtener IDs de canciones recientes del historial
       const recentIds = await PlayHistoryService.getRecentTrackIds(5);
-      console.log('🎯 IDs recientes:', recentIds);
-      
       const lastPlayed = await PlayHistoryService.getLastPlayed();
-      console.log('🎵 Última reproducida:', lastPlayed?.track.title);
       
       let tracks: StoredTrack[] = [];
       
       if (recentIds.length > 0) {
-        console.log('🎵 HAY HISTORIAL - IDs para recomendaciones:', recentIds);
-        
         if (lastPlayed) {
           setLastPlayedInfo(`Basado en tu historial · ${lastPlayed.track.title} ${lastPlayed.track.artist ? `· ${lastPlayed.track.artist}` : ''}`);
         }
-        
-        // 2. Obtener recomendaciones basadas en el historial
-        console.log('🎵 Llamando a getRecommendationsFromHistory con IDs:', recentIds);
         tracks = await MonochromeAPI.getRecommendationsFromHistory(recentIds, 30);
-        console.log('🎵 Recomendaciones obtenidas del historial:', tracks.length);
         
-        // 3. Si hay pocas recomendaciones, complementar con generales
         if (tracks.length < 10) {
-          console.log('🎵 Pocas recomendaciones basadas en historial, complementando con generales...');
           const generalTracks = await MonochromeAPI.getRecommendations(424698825);
-          console.log('🎵 Recomendaciones generales obtenidas:', generalTracks.length);
-          
-          // Mezclar evitando duplicados
           const existingIds = new Set(tracks.map(t => t.id));
           const newTracks = generalTracks.filter(t => !existingIds.has(t.id));
-          
           tracks = [...tracks, ...newTracks.slice(0, 10 - tracks.length)];
-          console.log('🎵 Total después de complementar:', tracks.length);
         }
       } else {
-        // No hay historial, mostrar recomendaciones por defecto
-        console.log('🎵 NO HAY HISTORIAL - mostrando recomendaciones generales');
         setLastPlayedInfo('Descubre música nueva');
         tracks = await MonochromeAPI.getRecommendations(424698825);
-        console.log('🎵 Recomendaciones generales:', tracks.length);
       }
       
-      // 4. Mezclar un poco para dar variedad pero mantener relevancia
       const shuffled = [...tracks];
       for (let i = shuffled.length - 1; i > 0; i--) {
-        if (Math.random() > 0.7) { // 30% de probabilidad de mezclar
+        if (Math.random() > 0.7) {
           const j = Math.floor(Math.random() * (i + 1));
           [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
         }
       }
       
       setRecommendations(shuffled);
-      console.log('✅ Recomendaciones finales:', shuffled.length);
-      console.log('✅ Primeras 3 recomendaciones:', shuffled.slice(0, 3).map(t => t.title));
-      
     } catch (error) {
       console.log('❌ Error loading recommendations:', error);
     } finally {
@@ -133,7 +161,6 @@ export default function HomeScreen() {
     }
   }, [offlineMode]);
 
-  // Efecto para cargar recomendaciones al montar y cuando cambia offlineMode
   useEffect(() => {
     loadRecommendations();
   }, [offlineMode, loadRecommendations]);
@@ -142,7 +169,6 @@ export default function HomeScreen() {
     try {
       const saved = await AsyncStorage.getItem(OFFLINE_MODE_KEY);
       setOfflineMode(saved === 'true');
-      console.log('⚙️ Modo offline cargado:', saved === 'true');
     } catch (error) {
       console.log('Error loading offline mode:', error);
     }
@@ -151,11 +177,9 @@ export default function HomeScreen() {
   const loadDownloads = async () => {
     const tracks = await storageService.getDownloadedTracks();
     setDownloadedTracks(tracks);
-    console.log('⬇️ Descargas cargadas:', tracks.length);
   };
 
   const handleRefresh = () => {
-    console.log('🔄 Refrescando recomendaciones...');
     setRefreshing(true);
     loadRecommendations();
   };
@@ -163,40 +187,31 @@ export default function HomeScreen() {
   const handleTrackPress = (index: number) => {
     const track = filteredRecommendations[index];
     if (track) {
-      if (offlineMode) {
-        const isDownloaded = downloadedTracks.some(t => t.id === track.id);
-        if (!isDownloaded) {
-          Alert.alert(
-            '📱 Modo Offline',
-            'Esta canción no está disponible sin conexión. Descarga canciones para escucharlas offline.'
-          );
-          return;
-        }
+      if (offlineMode && !downloadedTracks.some(t => t.id === track.id)) {
+        Alert.alert('📱 Modo Offline', 'Esta canción no está disponible sin conexión.');
+        return;
       }
-      
-      console.log('🎵 Reproduciendo desde inicio:', {
-        cancion: track.title,
-        artista: track.artist,
-        totalEnCola: filteredRecommendations.length,
-        indice: index
-      });
-      
-      playTrack(
-        track,
-        filteredRecommendations,
-        index,
-        'recommendations'
-      );
+      playTrack(track, filteredRecommendations, index, 'recommendations');
     }
   };
+
+  // Interpolación del Header al hacer Scroll (Efecto desvanecido sofisticado)
+  const headerOpacity = scrollY.interpolate({
+    inputRange: [0, 120],
+    outputRange: [1, 0.3],
+    extrapolate: 'clamp',
+  });
+
+  const headerScale = scrollY.interpolate({
+    inputRange: [-50, 0],
+    outputRange: [1.05, 1],
+    extrapolate: 'clamp',
+  });
 
   if (loading) {
     return (
       <ScreenWrapper>
-        <LinearGradient
-          colors={['#0A0A0A', '#1A1A1A']}
-          style={StyleSheet.absoluteFill}
-        />
+        <LinearGradient colors={['#0A0A0A', '#1A1A1A']} style={StyleSheet.absoluteFill} />
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color="#1DB954" />
           <Text style={styles.loadingText}>Cargando tu música...</Text>
@@ -207,26 +222,26 @@ export default function HomeScreen() {
 
   return (
     <ScreenWrapper>
-      <LinearGradient
-        colors={['#0A0A0A', '#1A1A1A', '#0F0F0F']}
-        style={StyleSheet.absoluteFill}
-      />
+      <LinearGradient colors={['#050505', '#121212', '#050505']} style={StyleSheet.absoluteFill} />
       
-      {/* Elementos decorativos */}
-      <View style={styles.decorativeCircle1} />
-      <View style={styles.decorativeCircle2} />
+      {/* 🔮 Orbes Líquidos en Background */}
+      <Animated.View style={[styles.decorativeCircle1, { transform: [{ translateY: orb1Y }] }] as ViewStyle[]} />
+      <Animated.View style={[styles.decorativeCircle2, { transform: [{ translateX: orb2X }] }] as ViewStyle[]} />
 
-      <FlatList
+      <Animated.FlatList
         data={filteredRecommendations}
         keyExtractor={(item) => item.id.toString()}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+          { useNativeDriver: true }
+        )}
+        scrollEventThrottle={16}
         renderItem={({ item, index }) => (
-          <TrackItem
-            track={item}
+          <AnimatedTrackItem
+            item={item}
             index={index}
             isActive={currentTrack?.id === item.id}
             onPlay={handleTrackPress}
-            showDownload={true}
-            showFavorite={true}
           />
         )}
         refreshControl={
@@ -239,9 +254,9 @@ export default function HomeScreen() {
           />
         }
         ListHeaderComponent={
-          <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
+          <Animated.View style={[styles.header, { paddingTop: insets.top + 10, opacity: headerOpacity, transform: [{ scale: headerScale }] }] as ViewStyle[]}>
             <LinearGradient
-              colors={['rgba(29,185,84,0.2)', 'rgba(29,185,84,0.1)']}
+              colors={['rgba(29,185,84,0.18)', 'rgba(29,185,84,0.02)']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.heroGradient}
@@ -251,7 +266,7 @@ export default function HomeScreen() {
                 <Text style={styles.title}>MetMusic</Text>
                 
                 {offlineMode && (
-                  <BlurView intensity={40} tint="dark" style={styles.offlineBadge}>
+                  <BlurView intensity={40} tint="dark" style={styles.offlineBadge as ViewStyle}>
                     <Ionicons name="cloud-outline" size={14} color="#1DB954" />
                     <Text style={styles.offlineBadgeText}>Modo offline activado</Text>
                   </BlurView>
@@ -260,7 +275,7 @@ export default function HomeScreen() {
             </LinearGradient>
 
             {lastPlayedInfo && !offlineMode && (
-              <BlurView intensity={40} tint="dark" style={styles.infoContainer}>
+              <BlurView intensity={40} tint="dark" style={styles.infoContainer as ViewStyle}>
                 <Ionicons name="time-outline" size={16} color="#1DB954" />
                 <Text style={styles.infoText}>{lastPlayedInfo}</Text>
               </BlurView>
@@ -279,54 +294,33 @@ export default function HomeScreen() {
                 </Text>
               </View>
             )}
-          </View>
+          </Animated.View>
         }
         ListEmptyComponent={
           offlineMode && filteredRecommendations.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <BlurView intensity={30} tint="dark" style={styles.emptyCard}>
-                <LinearGradient
-                  colors={['rgba(29,185,84,0.2)', 'rgba(29,185,84,0.05)']}
-                  style={styles.emptyGradient}
-                >
-                  <Ionicons name="cloud-offline-outline" size={70} color="rgba(255,255,255,0.2)" />
+              <BlurView intensity={30} tint="dark" style={styles.emptyCard as ViewStyle}>
+                <LinearGradient colors={['rgba(29,185,84,0.15)', 'rgba(29,185,84,0.02)']} style={styles.emptyGradient}>
+                  <Ionicons name="cloud-offline-outline" size={70} color="rgba(255,255,255,0.15)" />
                   <Text style={styles.emptyTitle}>Modo offline</Text>
-                  <Text style={styles.emptyText}>
-                    No hay recomendaciones disponibles sin conexión
-                  </Text>
+                  <Text style={styles.emptyText}>No hay recomendaciones disponibles sin conexión</Text>
                   <View style={styles.emptyDivider} />
-                  <Text style={styles.emptyHint}>
-                    💡 Para escuchar música sin internet:
-                  </Text>
+                  <Text style={styles.emptyHint}>💡 Para escuchar música sin internet:</Text>
                   <View style={styles.stepsContainer}>
                     <View style={styles.step}>
-                      <View style={styles.stepNumber}>
-                        <Text style={styles.stepNumberText}>1</Text>
-                      </View>
-                      <Text style={styles.stepText}>
-                        Ve a <Text style={styles.stepHighlight}>Biblioteca</Text>
-                      </Text>
+                      <View style={styles.stepNumber}><Text style={styles.stepNumberText}>1</Text></View>
+                      <Text style={styles.stepText}>Ve a <Text style={styles.stepHighlight}>Biblioteca</Text></Text>
                     </View>
                     <View style={styles.step}>
-                      <View style={styles.stepNumber}>
-                        <Text style={styles.stepNumberText}>2</Text>
-                      </View>
-                      <Text style={styles.stepText}>
-                        Elige una <Text style={styles.stepHighlight}>playlist</Text>
-                      </Text>
+                      <View style={styles.stepNumber}><Text style={styles.stepNumberText}>2</Text></View>
+                      <Text style={styles.stepText}>Elige una <Text style={styles.stepHighlight}>playlist</Text></Text>
                     </View>
                     <View style={styles.step}>
-                      <View style={styles.stepNumber}>
-                        <Text style={styles.stepNumberText}>3</Text>
-                      </View>
-                      <Text style={styles.stepText}>
-                        Toca <Ionicons name="cloud-download-outline" size={14} color="#1DB954" /> para descargar
-                      </Text>
+                      <View style={styles.stepNumber}><Text style={styles.stepNumberText}>3</Text></View>
+                      <Text style={styles.stepText}>Toca <Ionicons name="cloud-download-outline" size={14} color="#1DB954" /> para descargar</Text>
                     </View>
                   </View>
-                  <Text style={styles.emptyNote}>
-                    Las canciones descargadas aparecerán aquí
-                  </Text>
+                  <Text style={styles.emptyNote}>Las canciones descargadas aparecerán aquí</Text>
                 </LinearGradient>
               </BlurView>
             </View>
@@ -335,9 +329,7 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.listContent,
-          {
-            paddingBottom: TAB_BAR_HEIGHT + playerOffset + insets.bottom + 20,
-          }
+          { paddingBottom: TAB_BAR_HEIGHT + playerOffset + insets.bottom + 20 }
         ]}
       />
     </ScreenWrapper>
@@ -347,65 +339,70 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   decorativeCircle1: {
     position: 'absolute',
-    width: 250,
-    height: 250,
-    borderRadius: 125,
-    backgroundColor: 'rgba(29,185,84,0.05)',
-    top: -80,
-    right: -80,
+    width: 280,
+    height: 280,
+    borderRadius: 140,
+    backgroundColor: 'rgba(29,185,84,0.035)',
+    top: -50,
+    right: -60,
   },
   decorativeCircle2: {
     position: 'absolute',
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    backgroundColor: 'rgba(29,185,84,0.03)',
-    bottom: -60,
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    backgroundColor: 'rgba(29,185,84,0.015)',
+    bottom: height * 0.15,
     left: -60,
   },
   header: {
-    paddingBottom: 20,
+    paddingBottom: 15,
   },
   heroGradient: {
     marginHorizontal: 16,
     marginBottom: 16,
-    borderRadius: 30,
+    borderRadius: 24,
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.03)',
   },
   hero: {
-    padding: 30,
+    paddingVertical: 32,
+    paddingHorizontal: 24,
     alignItems: 'center',
   },
   greeting: {
-    color: 'rgba(255,255,255,0.5)',
-    fontSize: 14,
-    fontWeight: '500',
-    letterSpacing: 1,
-    marginBottom: 8,
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    marginBottom: 4,
   },
   title: {
-    fontSize: 36,
-    fontWeight: '800',
+    fontSize: 40,
+    fontWeight: '900',
     color: '#FFF',
-    marginBottom: 12,
+    marginBottom: 14,
+    letterSpacing: -0.8,
     textShadowColor: 'rgba(29,185,84,0.3)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 10,
+    textShadowOffset: { width: 0, height: 4 },
+    textShadowRadius: 15,
   },
   offlineBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 30,
-    gap: 8,
-    backgroundColor: 'rgba(29,185,84,0.15)',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 6,
+    backgroundColor: 'rgba(29,185,84,0.12)',
     borderWidth: 1,
-    borderColor: 'rgba(29,185,84,0.3)',
+    borderColor: 'rgba(29,185,84,0.25)',
   },
   offlineBadgeText: {
-    color: '#FFF',
-    fontSize: 13,
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 12,
     fontWeight: '500',
   },
   infoContainer: {
@@ -413,40 +410,43 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginHorizontal: 16,
     marginBottom: 20,
-    padding: 12,
-    borderRadius: 25,
-    gap: 8,
-    backgroundColor: 'rgba(29,185,84,0.1)',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    gap: 10,
+    backgroundColor: 'rgba(255,255,255,0.015)',
     borderWidth: 1,
-    borderColor: 'rgba(29,185,84,0.2)',
+    borderColor: 'rgba(255,255,255,0.04)',
   },
   infoText: {
     flex: 1,
-    color: '#FFF',
+    color: 'rgba(255,255,255,0.65)',
     fontSize: 13,
     fontWeight: '400',
+    lineHeight: 18,
   },
   sectionHeader: {
     marginHorizontal: 16,
-    marginBottom: 16,
+    marginBottom: 12,
     position: 'relative',
   },
   sectionGradient: {
     position: 'absolute',
     left: 0,
-    top: 0,
-    bottom: 0,
-    width: 4,
-    borderRadius: 2,
+    top: 2,
+    bottom: 2,
+    width: 3,
+    borderRadius: 1.5,
   },
   sectionTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
+    fontWeight: '700',
     color: '#FFF',
-    marginLeft: 16,
+    marginLeft: 14,
+    letterSpacing: -0.3,
   },
   listContent: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 0,
   },
   centerContainer: {
     flex: 1,
@@ -457,79 +457,80 @@ const styles = StyleSheet.create({
     color: '#1DB954',
     fontSize: 14,
     marginTop: 12,
+    fontWeight: '300',
   },
   emptyContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 20,
+    paddingHorizontal: 16,
+    paddingTop: 10,
   },
   emptyCard: {
-    width: width * 0.9,
-    borderRadius: 30,
+    width: '100%',
+    borderRadius: 24,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: 'rgba(255,255,255,0.05)',
   },
   emptyGradient: {
     alignItems: 'center',
-    padding: 30,
+    padding: 24,
   },
   emptyTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
+    fontSize: 20,
+    fontWeight: '700',
     color: '#FFF',
-    marginTop: 16,
-    marginBottom: 8,
+    marginTop: 14,
+    marginBottom: 6,
   },
   emptyText: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.6)',
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.5)',
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: 18,
     marginBottom: 16,
   },
   emptyDivider: {
-    width: '50%',
+    width: '40%',
     height: 1,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    marginVertical: 16,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    marginVertical: 12,
   },
   emptyHint: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#1DB954',
-    fontWeight: '500',
+    fontWeight: '600',
     marginBottom: 12,
   },
   stepsContainer: {
     width: '100%',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   step: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   stepNumber: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: 'rgba(29,185,84,0.2)',
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(29,185,84,0.15)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 10,
     borderWidth: 1,
-    borderColor: 'rgba(29,185,84,0.3)',
+    borderColor: 'rgba(29,185,84,0.25)',
   },
   stepNumberText: {
     color: '#1DB954',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: 'bold',
   },
   stepText: {
     flex: 1,
     fontSize: 13,
-    color: '#FFF',
+    color: 'rgba(255,255,255,0.8)',
   },
   stepHighlight: {
     color: '#1DB954',
@@ -537,8 +538,8 @@ const styles = StyleSheet.create({
   },
   emptyNote: {
     fontSize: 11,
-    color: 'rgba(255,255,255,0.3)',
+    color: 'rgba(255,255,255,0.25)',
     textAlign: 'center',
-    marginTop: 8,
+    marginTop: 6,
   },
 });
